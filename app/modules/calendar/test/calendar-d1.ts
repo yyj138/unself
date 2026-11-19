@@ -20,7 +20,7 @@ import { fileURLToPath } from 'node:url';
  */
 
 // 不用 new URL(...)：@cloudflare/workers-types 的 URL 与 node:url 的 URL 声明不同源，
-// 跨过去会报「URL is not assignable」。dirname + join 走纯字符串路径。
+// 跨过去会报URL is not assignable。dirname + join 走纯字符串路径。
 export const CALENDAR_MIGRATIONS_DIR = join(
   dirname(fileURLToPath(import.meta.url)),
   '..',

@@ -100,7 +100,7 @@ export function seedEvent(db: CalendarTestDb, options: SeedEventOptions = {}): s
   return id;
 }
 
-/** 种子变更流水（用于「同一毫秒多条」这类只能靠直插构造的用例）。 */
+/** 种子变更流水（用于同一毫秒多条这类只能靠直插构造的用例）。 */
 export function seedChange(
   db: CalendarTestDb,
   options: {

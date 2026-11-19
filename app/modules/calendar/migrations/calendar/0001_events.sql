@@ -1,5 +1,5 @@
 -- SPDX-License-Identifier: AGPL-3.0-only
--- 日历「改」功能：日程主表 + 变更流水表
+-- 日历改功能：日程主表 + 变更流水表
 -- 时间字段存 UTC 毫秒（INTEGER）；changed_fields 存 JSON 数组，元素用 API 字段名
 -- 迁移只增不改：已执行过的文件不能修改（改了也不会重跑）
 

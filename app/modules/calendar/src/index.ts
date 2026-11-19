@@ -6,7 +6,7 @@ import { listChanges } from './routes/changes';
 import { getEvent, patchEvent } from './routes/events';
 
 /**
- * 日历「改」功能模块入口。
+ * 日历改功能模块入口。
  *
  * 这个文件只负责挂载：路由和生命周期端点一次定好后，业务实现都在各自文件里演进
  * （index.ts 反复改动是两人协作里最典型的冲突源）。

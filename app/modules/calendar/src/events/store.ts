@@ -5,9 +5,9 @@ import type { ColumnPatch } from './validate';
 /**
  * 日程的数据库操作（A-2）。
  *
- * D1 没有 BEGIN/COMMIT：并发安全靠「带版本号的条件 UPDATE」，`meta.changes` 为 0 就说明
+ * D1 没有 BEGIN/COMMIT：并发安全靠带版本号的条件 UPDATE，`meta.changes` 为 0 就说明
  * 有人先改了或已经不在了。变更流水是独立 INSERT——即使它失败，主表数据仍然正确，
- * 只少一条提示记录，下次修改会补上。不为「原子」设计两段提交。
+ * 只少一条提示记录，下次修改会补上。不为原子设计两段提交。
  */
 
 /** 查一条（含软删的行，调用方自己判 deleted_at）。 */

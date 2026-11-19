@@ -4,7 +4,7 @@ import { requireAuth, type AppEnv } from './auth';
 import type { ChangeRow, EventRow } from './types';
 
 /**
- * 模块生命周期：卸载时「导出并删除」/「直接删除」用（docs/modules.md §9）。
+ * 模块生命周期：卸载时导出并删除/直接删除用（docs/modules.md §9）。
  * 认证方式与业务接口一致：先验模块 token，再动库。
  */
 
