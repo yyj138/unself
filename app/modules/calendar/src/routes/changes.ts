@@ -7,7 +7,7 @@ import type { EventChange } from '../types';
 /**
  * 变更流（A-4）：GET /api/events/changes?since=<毫秒>&excludeEventId=<id>
  *
- * 前端每 3 秒拉一次，用返回的 cursor 推进。since 用「含当毫秒」的语义，同一毫秒里的多条
+ * 前端每 3 秒拉一次，用返回的 cursor 推进。since 用含当毫秒的语义，同一毫秒里的多条
  * 记录一次全给；重复的尾巴由前端按 eventId 去重并取最大版本（硬约定第 4 条）。
  * 单次最多 200 条，够一次 3 秒窗口内所有人在同一个团队里的编辑量。
  */

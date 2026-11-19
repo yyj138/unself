@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 /**
- * 日历「改」功能的字段契约。
+ * 日历改功能的字段契约。
  *
  * 两套命名各管一段：数据库列是 snake_case（`start_at`），对外 API 一律 camelCase
  * （`startAt`）——这是和查/增/删三组共用的硬约定，任何一侧都不许直接透出另一侧的名字。
