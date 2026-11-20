@@ -2,8 +2,8 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue'
 import type { CalendarEvent, EventStatus } from '../../../src/types'
-import { AuthExpiredError, patchEvent, VersionConflictError, type EventPatch } from '../lib/api'
-import { diffEditableFields, validateDraft } from '../lib/validate'
+import { ApiError, AuthExpiredError, patchEvent, VersionConflictError, type EventPatch } from '../lib/api'
+import { describeApiError, diffEditableFields, validateDraft } from '../lib/validate'
 
 const props = defineProps<{ event: CalendarEvent }>()
 const emit = defineEmits<{
@@ -95,6 +95,8 @@ async function onSave(): Promise<void> {
       })
     } else if (err instanceof AuthExpiredError) {
       emit('auth-expired')
+    } else if (err instanceof ApiError) {
+      error.value = describeApiError(err.code, err.field)
     } else {
       error.value = '保存失败，请稍后再试'
     }
@@ -106,6 +108,7 @@ async function onSave(): Promise<void> {
 
 <template>
   <section class="editor">
+    <p class="tz-hint">时间按你电脑的本地时区显示和保存</p>
     <label class="field">
       <span>标题</span>
       <input v-model="title" type="text" maxlength="200" />
@@ -144,6 +147,7 @@ async function onSave(): Promise<void> {
 
 <style scoped>
 .editor { background: var(--unself-color-surface, #fff); border: 1px solid var(--unself-color-border, #ddd); border-radius: var(--unself-radius-lg, 12px); padding: 20px; }
+.tz-hint { font-size: var(--unself-font-size-sm, 13px); color: var(--unself-color-text-secondary, #666); margin: 0 0 14px; }
 .field { display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px; font-size: var(--unself-font-size-sm, 13px); color: var(--unself-color-text-secondary, #555); }
 .field input, .field textarea, .field select { padding: 8px 10px; border: 1px solid var(--unself-color-border, #ddd); border-radius: var(--unself-radius-md, 8px); font: inherit; color: var(--unself-color-text, #1a1a1a); background: var(--unself-color-bg, #fff); }
 .msg { font-size: var(--unself-font-size-sm, 13px); margin: 0 0 10px; }

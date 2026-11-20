@@ -31,6 +31,8 @@ export function useEventChanges(options: {
         const seen = latestByEvent.get(change.eventId) ?? 0
         if (change.toVersion <= seen) continue
         latestByEvent.set(change.eventId, change.toVersion)
+        // TODO(将来做日程列表时再处理)：这里把别的日程变更丢掉，但 cursor 已经推进，
+        // 将来列表要提示其它日程就会漏。当前单条编辑页用不到，先记一笔。
         if (change.eventId !== options.eventId) continue
         // 自己保存产生的变更，版本号不比本地新，不提示（等价于 excludeEventId 的目的）
         if (change.toVersion <= options.getVersion()) continue
