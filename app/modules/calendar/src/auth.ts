@@ -37,8 +37,11 @@ export async function requireAuth(c: Context<AppEnv>): Promise<Response | null> 
     const claims = await verifyModuleToken(auth.slice(7), {
       coreJwksJson,
       audience: MODULE_ID,
-      ...(c.env.CORE_ISSUER ? { issuer: c.env.CORE_ISSUER } : {}),
     });
+    // SDK 只校验 audience，iss 在模块侧补：配了 CORE_ISSUER 就必须对上
+    if (c.env.CORE_ISSUER && claims.iss !== c.env.CORE_ISSUER) {
+      return c.json({ error: 'token invalid or expired' }, 401);
+    }
     c.set('claims', claims);
     return null;
   } catch {
