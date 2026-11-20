@@ -286,3 +286,34 @@ describe('认证：CORE_ISSUER 对 iss 的实际校验', () => {
     expect(res.status).toBe(401);
   });
 });
+
+describe('认证：实例 id 覆盖 aud', () => {
+  it('配了 CORE_AUDIENCE 且 token 的 aud 与之一致 → 200', async () => {
+    const { makeToken } = await mintSetup(env);
+    env.CORE_AUDIENCE = 'team-calendar';
+    const token = await makeToken({ sub: 'u_a', name: '黄一', aud: 'team-calendar' });
+    seedEvent(db, { id: 'evt_aud_ok', organizerId: 'u_a', version: 1 });
+
+    const res = await patchEvent('evt_aud_ok', { title: '新标题', version: 1 }, authHeaders(token));
+    expect(res.status).toBe(200);
+  });
+
+  it('配了 CORE_AUDIENCE 但 token 的 aud 仍是 calendar → 401', async () => {
+    const { makeToken } = await mintSetup(env);
+    env.CORE_AUDIENCE = 'team-calendar';
+    const token = await makeToken({ sub: 'u_a', name: '黄一' });
+    seedEvent(db, { id: 'evt_aud_bad', organizerId: 'u_a', version: 1 });
+
+    const res = await patchEvent('evt_aud_bad', { title: '新标题', version: 1 }, authHeaders(token));
+    expect(res.status).toBe(401);
+  });
+
+  it('没配 CORE_AUDIENCE 时回落到 manifest.id，aud=calendar → 200', async () => {
+    const { makeToken } = await mintSetup(env);
+    const token = await makeToken({ sub: 'u_a', name: '黄一' });
+    seedEvent(db, { id: 'evt_aud_default', organizerId: 'u_a', version: 1 });
+
+    const res = await patchEvent('evt_aud_default', { title: '新标题', version: 1 }, authHeaders(token));
+    expect(res.status).toBe(200);
+  });
+});
