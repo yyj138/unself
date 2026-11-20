@@ -5,13 +5,7 @@ import { findEvent, insertChange, updateEventConditional } from '../events/store
 import { validatePatch } from '../events/validate';
 import { rowToEvent } from '../types';
 
-/**
- * 日程接口（A-3）。
- *
- * PATCH 的判定顺序是固定的：验 token → 查记录（已删除的一律 404）→ 判组织者 → 校验
- * → 带版本号的条件更新 → 写变更记录。顺序不能调：先判组织者再校验，否则非组织者能从
- * 400 与 409 的差别里探出别人日程的字段内容。
- */
+/** PATCH 顺序固定：验 token → 查记录（软删 404）→ 判组织者 → 校验 → 条件更新 → 写流水。先判组织者再校验，否则非组织者能从 400/409 的差别探出字段内容。 */
 
 /** 21 位随机 id（变更流水用；事件 id 由增组写入，模块不生成）。 */
 function newChangeId(): string {
@@ -52,9 +46,7 @@ export async function patchEvent(c: Context<AppEnv>): Promise<Response> {
 
   const before = rowToEvent(row);
 
-  // 业务字段没有变化：不写库、不写流水。但版本已经过期时要报冲突——
-  // 前端拿旧视图提交了一份与库里一致的内容，说明它看到的不是最新状态，
-  // 若按幂等返回 200，客户端会误以为保存成功，实际用的是别人的版本。
+  // 无字段变化时不写库不写流水；但版本已过期必须报 409，否则前端会把旧视图当成保存成功。
   if (result.changedFields.length === 0) {
     if (result.patch.version !== row.version) {
       const latest = (await findEvent(c.env.DB, id)) ?? row;
@@ -103,14 +95,13 @@ export async function patchEvent(c: Context<AppEnv>): Promise<Response> {
   }
 
   const updated = await findEvent(c.env.DB, id);
-  const event = updated ? rowToEvent(updated) : { ...result.next, version: before.version + 1, updatedAt: now };
+  const event = updated
+    ? rowToEvent(updated)
+    : { ...result.next, version: before.version + 1, updatedAt: now };
   return c.json({ event, version: event.version });
 }
 
-/**
- * 只读详情：查组交付前的自测通道（联调时删）。
- * 已删除的记录与非组织者都按 404 / 403 处理，口径与 PATCH 一致。
- */
+/** 只读详情：查组交付前的自测通道，软删一律 404，口径同 PATCH。 */
 export async function getEvent(c: Context<AppEnv>): Promise<Response> {
   const blocked = await requireAuth(c);
   if (blocked) return blocked;

@@ -3,11 +3,7 @@ import type { ChangeRow, EventRow } from '../types';
 import type { ColumnPatch } from './validate';
 
 /**
- * 日程的数据库操作（A-2）。
- *
- * D1 没有 BEGIN/COMMIT：并发安全靠带版本号的条件 UPDATE，`meta.changes` 为 0 就说明
- * 有人先改了或已经不在了。变更流水是独立 INSERT——即使它失败，主表数据仍然正确，
- * 只少一条提示记录，下次修改会补上。不为原子设计两段提交。
+ * 日程的数据库操作（A-2）。D1 无事务，并发安全靠带版本号的条件 UPDATE，meta.changes 为 0 即有人先改；流水是独立 INSERT，失败不影响主表。
  */
 
 /** 查一条（含软删的行，调用方自己判 deleted_at）。 */
@@ -77,8 +73,8 @@ export async function insertChange(
 }
 
 /**
- * 变更流：since 之后（含当毫秒）的流水，排除自己刚改的那条。
- * 用 `>=` 是为了不漏同一毫秒里的多条记录；重复的尾巴由前端按 eventId 去重（硬约定第 4 条）。
+ * 变更流：since 之后（含当毫秒）的流水，可排除某条日程。
+ * 用 `>=` 是为了不漏同一毫秒的多条记录；重复尾部由前端去重（硬约定第 4 条）。
  */
 export async function listChanges(
   db: D1Database,
@@ -86,26 +82,19 @@ export async function listChanges(
   excludeEventId: string | null,
   limit: number,
 ): Promise<ChangeRow[]> {
-  if (excludeEventId) {
-    const result = await db
-      .prepare(
-        `SELECT * FROM calendar_event_changes
-          WHERE created_at >= ? AND event_id != ?
-          ORDER BY created_at ASC, id ASC
-          LIMIT ?`,
-      )
-      .bind(since, excludeEventId, limit)
-      .all<ChangeRow>();
-    return result.results;
-  }
+  // where 只取自下面两个固定串，不拼用户输入
+  const where = excludeEventId
+    ? 'created_at >= ? AND event_id != ?'
+    : 'created_at >= ?';
+  const binds = excludeEventId ? [since, excludeEventId, limit] : [since, limit];
   const result = await db
     .prepare(
       `SELECT * FROM calendar_event_changes
-        WHERE created_at >= ?
+        WHERE ${where}
         ORDER BY created_at ASC, id ASC
         LIMIT ?`,
     )
-    .bind(since, limit)
+    .bind(...binds)
     .all<ChangeRow>();
   return result.results;
 }

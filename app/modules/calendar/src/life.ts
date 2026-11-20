@@ -3,10 +3,7 @@ import type { Context } from 'hono';
 import { requireAuth, type AppEnv } from './auth';
 import type { ChangeRow, EventRow } from './types';
 
-/**
- * 模块生命周期：卸载时导出并删除/直接删除用（docs/modules.md §9）。
- * 认证方式与业务接口一致：先验模块 token，再动库。
- */
+/** 生命周期端点（docs/modules.md §9）：导出与清库，认证同业务接口。 */
 
 export async function exportData(c: Context<AppEnv>): Promise<Response> {
   const blocked = await requireAuth(c);
