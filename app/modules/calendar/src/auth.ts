@@ -13,6 +13,8 @@ export interface Bindings {
   CORE_JWKS_JSON?: string;
   /** Core issuer（可选；非空时额外校验 iss）。 */
   CORE_ISSUER?: string;
+  /** 实例 id 即 aud（可选；部署者改过实例名时注入，缺省用 manifest.id）。 */
+  CORE_AUDIENCE?: string;
 }
 
 export type AppEnv = {
@@ -33,7 +35,8 @@ export async function requireAuth(c: Context<AppEnv>): Promise<Response | null> 
   try {
     const claims = await verifyModuleToken(auth.slice(7), {
       coreJwksJson,
-      audience: MODULE_ID,
+      // aud 是实例 id，部署者可以改；缺省按 manifest.id（MODULE_ID）
+      audience: c.env.CORE_AUDIENCE ?? MODULE_ID,
     });
     // SDK 只校验 audience，iss 在模块侧补：配了 CORE_ISSUER 就必须对上
     if (c.env.CORE_ISSUER && claims.iss !== c.env.CORE_ISSUER) {
