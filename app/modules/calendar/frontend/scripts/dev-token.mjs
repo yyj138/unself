@@ -3,8 +3,9 @@
  * 本地联调辅助：生成 ES256 密钥对、写模块的 .dev.vars、签发模块 token。
  *
  * 用法（在 app/modules/calendar/frontend 下）：
- *   node scripts/dev-token.mjs            # 生成密钥（首次）+ 写 .dev.vars + 打印 token
+ *   node scripts/dev-token.mjs            # 生成密钥（首次）+ 写 .dev.vars + 打印 token（默认 24 小时）
  *   node scripts/dev-token.mjs --rotate   # 重新生成密钥
+ *   node scripts/dev-token.mjs --ttl 60   # 指定有效期秒数，用来验登录过期提示
  *   node scripts/dev-token.mjs --sub u2 --name 联调用户B   # 换身份签 token
  *
  * 产物都不入库：.dev-keys.json 与 app/modules/calendar/.dev.vars 都在 .gitignore 里。
@@ -76,7 +77,7 @@ function signToken(privateJwk, { sub, name, ttlSeconds }) {
 }
 
 function parseArgs(argv) {
-  const out = { rotate: false, sub: 'dev-u1', name: '联调用户A', ttl: 7200 };
+  const out = { rotate: false, sub: 'dev-u1', name: '联调用户A', ttl: 86400 };
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     if (arg === '--rotate') out.rotate = true;
@@ -91,11 +92,12 @@ const args = parseArgs(process.argv.slice(2));
 const keys = loadOrCreateKeys(args.rotate);
 const jwksJson = JSON.stringify(toJwks(keys.publicJwk));
 
-// .dev.vars 是 dotenv 格式：单引号包裹，内部双引号原样保留
-writeFileSync(
-  VARS_FILE,
-  [`CORE_JWKS_JSON='${jwksJson}'`, `CORE_ISSUER=${ISSUER}`, ''].join('\n'),
-);
+// .dev.vars 是 dotenv 格式：单引号包裹，内部双引号原样保留。
+// 只在内容确实变了才写：wrangler dev 监视这个文件，重复签发时无意义的重写会触发一遍重启。
+const varsContent = [`CORE_JWKS_JSON='${jwksJson}'`, `CORE_ISSUER=${ISSUER}`, ''].join('\n');
+const varsChanged =
+  !existsSync(VARS_FILE) || readFileSync(VARS_FILE, 'utf8') !== varsContent;
+if (varsChanged) writeFileSync(VARS_FILE, varsContent);
 
 const token = signToken(keys.privateJwk, {
   sub: args.sub,
@@ -103,7 +105,7 @@ const token = signToken(keys.privateJwk, {
   ttlSeconds: args.ttl,
 });
 
-console.log(`已写 ${VARS_FILE}`);
+console.log(varsChanged ? `已写 ${VARS_FILE}` : `${VARS_FILE} 内容未变，跳过写入`);
 console.log(`身份 sub=${args.sub} name=${args.name} 有效期 ${args.ttl}s`);
 console.log('');
 console.log('token:');
