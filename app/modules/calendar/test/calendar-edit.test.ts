@@ -264,3 +264,25 @@ describe('PATCH 409：版本冲突', () => {
     expect(db.query('SELECT * FROM calendar_event_changes')).toHaveLength(1);
   });
 });
+
+describe('认证：CORE_ISSUER 对 iss 的实际校验', () => {
+  it('配了 CORE_ISSUER 且 iss 相同 → 200', async () => {
+    const { makeToken } = await mintSetup(env);
+    env.CORE_ISSUER = 'unself-core';
+    const token = await makeToken({ sub: 'u_a', name: '黄一' });
+    seedEvent(db, { id: 'evt_iss_ok', organizerId: 'u_a', version: 1 });
+
+    const res = await patchEvent('evt_iss_ok', { title: '新标题', version: 1 }, authHeaders(token));
+    expect(res.status).toBe(200);
+  });
+
+  it('配了 CORE_ISSUER 但 iss 不同 → 401', async () => {
+    const { makeToken } = await mintSetup(env);
+    env.CORE_ISSUER = 'other-core';
+    const token = await makeToken({ sub: 'u_a', name: '黄一' });
+    seedEvent(db, { id: 'evt_iss_bad', organizerId: 'u_a', version: 1 });
+
+    const res = await patchEvent('evt_iss_bad', { title: '新标题', version: 1 }, authHeaders(token));
+    expect(res.status).toBe(401);
+  });
+});
