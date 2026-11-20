@@ -5,21 +5,13 @@ import { exportData, purgeData } from './life';
 import { listChanges } from './routes/changes';
 import { getEvent, patchEvent } from './routes/events';
 
-/**
- * 日历改功能模块入口。
- *
- * 这个文件只负责挂载：路由和生命周期端点一次定好后，业务实现都在各自文件里演进
- * （index.ts 反复改动是两人协作里最典型的冲突源）。
- */
+/** 模块入口：只挂载路由与生命周期端点，业务实现放各自文件，避免多人改同一处。 */
 
 const app = new Hono<AppEnv>();
 
 app.get('/api/health', (c) => c.json({ ok: true, service: 'module-calendar' }));
 
-/**
- * 顺序要紧：/api/events/changes 必须先于 /api/events/:id 注册，
- * 否则 changes 会被当成一个 id。
- */
+/** 顺序要紧：/changes 必须先于 /:id 注册，否则 changes 会被当成一个 id。 */
 app.get('/api/events/changes', listChanges);
 app.get('/api/events/:id', getEvent);
 app.patch('/api/events/:id', patchEvent);
@@ -27,7 +19,7 @@ app.patch('/api/events/:id', patchEvent);
 app.get('/life/export', exportData);
 app.post('/life/purge', purgeData);
 
-/** 模块页：样式只引用 --unself-* 令牌，不持有颜色值；页面内请求全用相对路径。 */
+/** 模块页：只用 --unself-* 令牌不写死颜色，请求走相对路径。 */
 app.get('/', (c) => {
   return c.html(`<!doctype html>
 <html lang="zh-CN">

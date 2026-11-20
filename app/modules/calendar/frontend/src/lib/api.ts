@@ -1,12 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import type { CalendarEvent, EventChange, EventStatus } from '../../../src/types'
 
-/**
- * 阶段 2 的接口客户端。
- *
- * mock 模式：不发网络请求，用内存里的一份假日程和假变更流跑通 409 / 轮询 / 黄条。
- * 切真接口时在 frontend/.env.local 里写 VITE_USE_MOCK=false，组件不用动。
- */
+/** 接口客户端：mock 模式走内存假数据，真接口在 .env.local 里写 VITE_USE_MOCK=false 即可切换。 */
 export const USE_MOCK = import.meta.env.VITE_USE_MOCK !== 'false'
 
 /** 真接口前缀：默认空串表示跟当前页面同源，/m/calendar 前缀由宿主剥掉。 */
