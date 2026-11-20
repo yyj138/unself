@@ -170,20 +170,13 @@ export async function patchEvent(id: string, patch: EventPatch): Promise<Calenda
   return body.event
 }
 
-export async function fetchChanges(
-  since: number,
-  excludeEventId?: string,
-): Promise<ChangesResult> {
+export async function fetchChanges(since: number): Promise<ChangesResult> {
   if (USE_MOCK) {
-    // 注意：真接口按 A 的约定用 excludeEventId 排除整条 event 的变更，
-    // 但那样会连「别人改了我正在编辑的这条」也一起排除，黄条弹不出来。
-    // 这个分歧已在 issue #6 提出；mock 阶段先不排除，保证提前提示能演示。
     const rows = mockChanges.filter((c) => c.createdAt >= since)
     const cursor = rows.length > 0 ? Math.max(since, rows[rows.length - 1]!.createdAt) : since
     return { changes: [...rows], cursor }
   }
   const params = new URLSearchParams({ since: String(since) })
-  if (excludeEventId) params.set('excludeEventId', excludeEventId)
   const res = await fetch(`${API_BASE}/api/events/changes?${params.toString()}`, {
     headers: authHeaders(),
   })

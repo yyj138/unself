@@ -5,10 +5,7 @@ import { AuthExpiredError, fetchChanges } from './api'
 
 const POLL_INTERVAL = 3000
 
-/**
- * 每 3 秒拉一次变更流，游标推进、按 eventId 去重；切后台暂停，切回补拉一次。
- * 不传 excludeEventId（它会连别人改同一条的提示一起排掉），改为按 toVersion 与本地 version 比较过滤自己。
- */
+/** 每 3 秒拉变更流，游标推进、按 eventId 去重；切后台暂停切回补拉，自己产生的变更按版本过滤。 */
 export function useEventChanges(options: {
   eventId: string
   getVersion: () => number
