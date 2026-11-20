@@ -1,0 +1,19 @@
+{
+  "id": "demo-1",
+  "uid": "demo-1@example",
+  "title": "产品周会",
+  "description": "对齐本周进度",
+  "location": "3 楼会议室",
+  "startAt": 1795164000000,
+  "endAt": 1795167600000,
+  "allDay": false,
+  "timezone": "Asia/Shanghai",
+  "organizerId": "u1",
+  "responseState": "accepted",
+  "rrule": null,
+  "status": "confirmed",
+  "version": 3,
+  "createdAt": 1795000000000,
+  "updatedAt": 1795000000000,
+  "deletedAt": null
+}
