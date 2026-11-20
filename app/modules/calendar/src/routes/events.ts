@@ -52,8 +52,15 @@ export async function patchEvent(c: Context<AppEnv>): Promise<Response> {
 
   const before = rowToEvent(row);
 
-  // 业务字段没有变化：不写库、不写流水，直接回当前值（幂等）
+  // 业务字段没有变化：不写库、不写流水。但版本已经过期时要报冲突——
+  // 前端拿旧视图提交了一份与库里一致的内容，说明它看到的不是最新状态，
+  // 若按幂等返回 200，客户端会误以为保存成功，实际用的是别人的版本。
   if (result.changedFields.length === 0) {
+    if (result.patch.version !== row.version) {
+      const latest = (await findEvent(c.env.DB, id)) ?? row;
+      const event = rowToEvent(latest);
+      return c.json({ error: 'version_conflict', event, version: event.version }, 409);
+    }
     return c.json({ event: before, version: before.version });
   }
 

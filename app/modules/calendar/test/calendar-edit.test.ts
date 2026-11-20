@@ -99,6 +99,24 @@ describe('PATCH /api/events/:id 正常路径', () => {
     expect(body.version).toBe(3);
     expect(db.query('SELECT * FROM calendar_event_changes')).toHaveLength(0);
   });
+
+  it('旧版本提交无变化的补丁 → 409（不因幂等短路放过过期视图）', async () => {
+    const { makeToken } = await mintSetup(env);
+    const token = await makeToken({ sub: 'u_a' });
+    seedEvent(db, { id: 'evt_1', organizerId: 'u_a', version: 5, title: '周会' });
+
+    const res = await patchEvent('evt_1', { title: '周会', version: 3 }, authHeaders(token));
+    expect(res.status).toBe(409);
+    const body = (await res.json()) as {
+      error: string;
+      event: { title: string; version: number };
+      version: number;
+    };
+    expect(body.error).toBe('version_conflict');
+    expect(body.version).toBe(5);
+    expect(body.event.title).toBe('周会');
+    expect(db.query('SELECT * FROM calendar_event_changes')).toHaveLength(0);
+  });
 });
 
 describe('PATCH 400：校验拒绝', () => {
