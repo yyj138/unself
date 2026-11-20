@@ -4,23 +4,9 @@ import { dirname, join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath } from 'node:url';
 
-/**
- * 日历模块的最小 D1 适配器 + 迁移加载器（真 node:sqlite，零新依赖）。
- *
- * 为什么不直接 import workbench 的 test-factory：跨包 import 会把那份测试代码拉进本包的
- * tsc 编译上下文，node:sqlite 的 SQLInputValue 与 @cloudflare/workers-types 的 D1 声明
- * 不同源，类型直接对不上（chat 也是因此 fork 了自己的工厂）。实现思路抄自
- * app/workbench/test/test-factory.ts（本仓 AGPL 代码），只保留 prepare/bind/first/all/run。
- *
- * 为什么不用手搓假 D1（docs/testing.md 禁项 / #60）：假替身按字符串匹配解释 SQL，
- * 漏 WHERE、引用幻影列、语义写偏都能全绿；真 SQLite 加载真迁移后这类问题当场抛错。
- *
- * 适配器对齐真 D1 语义：all() 回 { results, success, meta }，run() 回 meta.changes/last_row_id，
- * first() 无行回 null 且支持 first('col') 单列，行是普通对象（非 null 原型）。
- */
+/** 最小 D1 适配器 + 迁移加载（真 node:sqlite，零新依赖）：真库跑真迁移，不用假 D1；跨包 import workbench 工厂会因 SQLInputValue 与 D1 声明不同源而类型冲突。 */
 
-// 不用 new URL(...)：@cloudflare/workers-types 的 URL 与 node:url 的 URL 声明不同源，
-// 跨过去会报URL is not assignable。dirname + join 走纯字符串路径。
+// 不用 new URL：workers-types 与 node:url 的 URL 声明不同源，只能走 dirname + join
 export const CALENDAR_MIGRATIONS_DIR = join(
   dirname(fileURLToPath(import.meta.url)),
   '..',

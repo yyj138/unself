@@ -2,19 +2,14 @@
 import type { ChangeRow, EventRow } from '../types';
 import type { ColumnPatch } from './validate';
 
-/**
- * 日程的数据库操作（A-2）。D1 无事务，并发安全靠带版本号的条件 UPDATE，meta.changes 为 0 即有人先改；流水是独立 INSERT，失败不影响主表。
- */
+/** 日程数据库操作（A-2）：D1 无事务，并发靠带版本号的条件 UPDATE，流水独立 INSERT 失败不影响主表。 */
 
 /** 查一条（含软删的行，调用方自己判 deleted_at）。 */
 export async function findEvent(db: D1Database, id: string): Promise<EventRow | null> {
   return await db.prepare('SELECT * FROM calendar_events WHERE id = ?').bind(id).first<EventRow>();
 }
 
-/**
- * 条件更新：只有 id、版本号、未删除三者同时对得上才落库。
- * @returns 受影响行数（0 = 版本冲突或记录已不存在）
- */
+/** 条件更新：id、版本号、未删除三者同时对得上才落库，返回受影响行数。 */
 export async function updateEventConditional(
   db: D1Database,
   id: string,
@@ -72,10 +67,7 @@ export async function insertChange(
     .run();
 }
 
-/**
- * 变更流：since 之后（含当毫秒）的流水，可排除某条日程。
- * 用 `>=` 是为了不漏同一毫秒的多条记录；重复尾部由前端去重（硬约定第 4 条）。
- */
+/** 变更流：since 之后（含当毫秒）的流水，可排除某条日程；重复尾由前端去重。 */
 export async function listChanges(
   db: D1Database,
   since: number,

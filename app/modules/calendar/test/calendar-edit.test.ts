@@ -10,11 +10,7 @@ import {
   type CalendarTestDb,
 } from './calendar-test-factory.ts';
 
-/**
- * A-3 路由级集成测试：PATCH /api/events/:id 走真路由 + 真 SQLite + 真 JWKS 验签。
- *
- * 覆盖 200 / 400 / 401 / 403 / 404 / 409，以及两个人同时改同一条时的并发唯一成功。
- */
+/** A-3 路由级集成测试：真路由 + 真 SQLite + 真 JWKS，覆盖 200/400/401/403/404/409 与并发唯一成功。 */
 
 let db: CalendarTestDb;
 let env: Record<string, unknown>;

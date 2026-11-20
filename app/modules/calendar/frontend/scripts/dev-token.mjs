@@ -1,15 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-/**
- * 本地联调辅助：生成 ES256 密钥对、写模块的 .dev.vars、签发模块 token。
- *
- * 用法（在 app/modules/calendar/frontend 下）：
- *   node scripts/dev-token.mjs            # 生成密钥（首次）+ 写 .dev.vars + 打印 token（默认 24 小时）
- *   node scripts/dev-token.mjs --rotate   # 重新生成密钥
- *   node scripts/dev-token.mjs --ttl 60   # 指定有效期秒数，用来验登录过期提示
- *   node scripts/dev-token.mjs --sub u2 --name 联调用户B   # 换身份签 token
- *
- * 产物都不入库：.dev-keys.json 与 app/modules/calendar/.dev.vars 都在 .gitignore 里。
- */
+/** 本地联调签发脚本：复用或生成 ES256 密钥、写模块 .dev.vars、打印 token；参数 --rotate / --ttl / --sub / --name，产物不入库。 */
 import { createPrivateKey, createSign, generateKeyPairSync } from 'node:crypto';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -92,8 +82,7 @@ const args = parseArgs(process.argv.slice(2));
 const keys = loadOrCreateKeys(args.rotate);
 const jwksJson = JSON.stringify(toJwks(keys.publicJwk));
 
-// .dev.vars 是 dotenv 格式：单引号包裹，内部双引号原样保留。
-// 只在内容确实变了才写：wrangler dev 监视这个文件，重复签发时无意义的重写会触发一遍重启。
+// .dev.vars 是 dotenv 格式（单引号包裹）；内容没变就不写，避免 wrangler dev 反复重启
 const varsContent = [`CORE_JWKS_JSON='${jwksJson}'`, `CORE_ISSUER=${ISSUER}`, ''].join('\n');
 const varsChanged =
   !existsSync(VARS_FILE) || readFileSync(VARS_FILE, 'utf8') !== varsContent;

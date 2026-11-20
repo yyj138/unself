@@ -11,10 +11,7 @@ import {
   type CalendarTestDb,
 } from './calendar-test-factory.ts';
 
-/**
- * A-4 路由级集成测试：GET /api/events/changes
- * 覆盖空游标 / 增量 / 同一毫秒多条 / 排除自己刚改的那条 / 游标不倒退。
- */
+/** A-4 路由级集成测试：空游标、增量、同毫秒多条、排除同条、游标不倒退。 */
 
 let db: CalendarTestDb;
 let env: Record<string, unknown>;

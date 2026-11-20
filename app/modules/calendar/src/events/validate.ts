@@ -74,11 +74,7 @@ function isInteger(value: unknown): value is number {
   return typeof value === 'number' && Number.isInteger(value) && Number.isFinite(value);
 }
 
-/**
- * 校验 PATCH 请求体，并合并到现有记录上得出最终值。
- * @param raw 请求体（不可信）
- * @param base 当前记录（调用方已确认存在且未删除）
- */
+/** 校验 PATCH 请求体并合并出最终值：raw 不可信，base 已确认存在且未删除。 */
 export function validatePatch(raw: unknown, base: EventRow): ValidateResult {
   if (!isPlainObject(raw)) {
     return fail('body_must_be_object');

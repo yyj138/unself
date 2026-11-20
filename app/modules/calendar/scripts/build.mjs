@@ -1,14 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-/**
- * 日历模块发布产物构建：
- *
- * 1. dist/worker.js   CF 装配入口：src/index.ts 全量 bundle（deps 全内联，部署零安装）。
- * 2. dist/manifest.json  manifest.yaml 的副本，构建期用 @unself/contracts 的 schema 校验，
- *    坏清单打不出包。
- *
- * 路径处理用 fileURLToPath：`new URL('..', import.meta.url).pathname` 在 Windows 上会变成
- * `/E:/...`，esbuild 直接报 not an absolute path。
- */
+/** 发布产物：bundle src/index.ts 成 dist/worker.js，并用 contracts 的 schema 校验 manifest.yaml 生成 dist/manifest.json；路径用 fileURLToPath 避免 Windows 下 new URL 的盘符问题。 */
 import { build } from 'esbuild';
 import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
@@ -33,8 +24,7 @@ await build({
 console.log('▣ calendar 产物就绪：dist/worker.js（CF 装配入口）');
 
 const require2 = createRequire(import.meta.url);
-// 用 node 直接执行 tsx 的 cli 脚本：Windows 上 execFileSync 直接跑 .mjs/.js 会走
-// 可执行文件查找，报 spawn ENOENT（hello 的写法在 POSIX 可用，Windows 不行）。
+// 用 node 直接跑 tsx 的 cli：Windows 上 execFileSync 执行 .mjs 会走可执行文件查找并报 spawn ENOENT
 execFileSync(
   process.execPath,
   [

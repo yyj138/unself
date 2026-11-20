@@ -20,10 +20,7 @@ export type AppEnv = {
   Variables: { claims: ModuleTokenClaims };
 };
 
-/**
- * 全模块唯一的认证收口：业务接口与 /life/* 都走这里。
- * 缺 JWKS 说明装配没注入（503），token 验不过或 aud 不是 calendar 都是 401。
- */
+/** 全模块唯一认证收口：缺 JWKS 503，token 验不过或 aud/iss 不对 401。 */
 export async function requireAuth(c: Context<AppEnv>): Promise<Response | null> {
   const auth = c.req.header('authorization');
   if (!auth?.startsWith('Bearer ')) {
