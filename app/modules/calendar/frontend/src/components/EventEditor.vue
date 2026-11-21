@@ -4,6 +4,7 @@ import { ref, watch } from 'vue'
 import type { CalendarEvent, EventStatus } from '../../../src/types'
 import { ApiError, AuthExpiredError, patchEvent, VersionConflictError, type EventPatch } from '../lib/api'
 import { describeApiError, diffEditableFields, validateDraft } from '../lib/validate'
+import { fromZonedInput, toZonedInput } from '../lib/time'
 
 const props = defineProps<{ event: CalendarEvent }>()
 const emit = defineEmits<{
@@ -21,20 +22,19 @@ type Draft = {
   status: EventStatus
 }
 
-function toLocalInput(ms: number): string {
-  const d = new Date(ms)
-  const pad = (n: number) => String(n).padStart(2, '0')
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
+/** 时间一律按日程自己的时区渲染与回写，不跟浏览器时区。 */
+function toInput(ms: number): string {
+  return toZonedInput(ms, props.event.timezone)
 }
-function fromLocalInput(s: string): number {
-  return new Date(s).getTime()
+function fromInput(s: string): number {
+  return fromZonedInput(s, props.event.timezone)
 }
 
 const title = ref(props.event.title)
 const description = ref(props.event.description ?? '')
 const location = ref(props.event.location ?? '')
-const startLocal = ref(toLocalInput(props.event.startAt))
-const endLocal = ref(toLocalInput(props.event.endAt))
+const startLocal = ref(toInput(props.event.startAt))
+const endLocal = ref(toInput(props.event.endAt))
 const status = ref<EventStatus>(props.event.status)
 
 const error = ref('')
@@ -45,8 +45,8 @@ watch(() => props.event, (e) => {
   title.value = e.title
   description.value = e.description ?? ''
   location.value = e.location ?? ''
-  startLocal.value = toLocalInput(e.startAt)
-  endLocal.value = toLocalInput(e.endAt)
+  startLocal.value = toZonedInput(e.startAt, e.timezone)
+  endLocal.value = toZonedInput(e.endAt, e.timezone)
   status.value = e.status
   saved.value = false
 })
@@ -61,8 +61,8 @@ async function onSave(): Promise<void> {
     title: title.value.trim(),
     description: description.value,
     location: location.value,
-    startAt: fromLocalInput(startLocal.value),
-    endAt: fromLocalInput(endLocal.value),
+    startAt: fromInput(startLocal.value),
+    endAt: fromInput(endLocal.value),
     status: status.value,
   }
   const invalid = validateDraft(draft)
@@ -109,7 +109,7 @@ async function onSave(): Promise<void> {
 
 <template>
   <section class="editor">
-    <p class="tz-hint">时间按你电脑的本地时区显示和保存</p>
+    <p class="tz-hint">时间按日程时区 {{ event.timezone }} 显示和保存</p>
     <label class="field">
       <span>标题</span>
       <input v-model="title" type="text" maxlength="200" />

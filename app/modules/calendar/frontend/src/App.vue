@@ -10,10 +10,10 @@ import {
   mockSimulateRemoteEdit,
   patchEvent,
   setTokenProvider,
-  USE_MOCK,
   VersionConflictError,
   type EventPatch,
 } from './lib/api'
+import { MODE_LOCKED, isMock, mode } from './lib/mode'
 import { createCalendarSession } from './lib/session'
 import { useEventChanges } from './lib/use-event-changes'
 import { diffEditableFields, type EditableDraft } from './lib/validate'
@@ -38,8 +38,15 @@ setTokenProvider(() => session.getToken())
 
 async function bootstrap(): Promise<void> {
   try {
-    // mock 模式没有壳、也不需要 token，直接加载；live 模式必须先握手拿 token
-    if (!USE_MOCK) await session.handshake()
+    // 没写环境变量时先试握手：成则真接口，壳不在则回落 mock
+    if (!isMock() || MODE_LOCKED === null) {
+      try {
+        await session.handshake(1500)
+        mode.value = 'live'
+      } catch (err) {
+        if (MODE_LOCKED === 'live') throw err
+      }
+    }
     handshakeReady.value = true
     await load()
   } catch (err) {
@@ -64,7 +71,7 @@ function onRemoteChange(change: EventChange): void {
   banner.value = { actorName: change.actorName, fields: change.changedFields, latest: null, retry: null }
 }
 
-useEventChanges({
+const { pendingCount } = useEventChanges({
   eventId: EVENT_ID,
   // 把当前表单的版本号交给轮询，用来过滤自己刚保存产生的变更
   getVersion: () => event.value?.version ?? 0,
@@ -139,13 +146,14 @@ function simulateRemote(): void {
 <template>
   <main class="page">
     <h1 class="page-title">日历 · 编辑日程</h1>
-    <p class="page-note">{{ USE_MOCK ? 'mock 演示：保存走假接口，撞车弹对比横幅。' : '真接口模式：数据读写走模块后端。' }}</p>
+    <p class="page-note">{{ isMock() ? 'mock 演示：保存走假接口，撞车弹对比横幅。' : '真接口模式：数据读写走模块后端。' }}</p>
 
     <p v-if="handshakeError" class="msg err">{{ handshakeError }}</p>
     <p v-if="!handshakeReady && !handshakeError" class="msg">正在连接平台…</p>
     <p v-if="authExpired" class="msg err">登录已过期，请重新登录。</p>
     <p v-if="loadError" class="msg err">{{ loadError }}</p>
 
+    <p v-if="pendingCount > 0" class="msg">另有 {{ pendingCount }} 条日程有更新</p>
     <RemoteEditBanner
       v-if="banner && event"
       :actor-name="banner.actorName"
@@ -166,7 +174,7 @@ function simulateRemote(): void {
       @auth-expired="authExpired = true"
     />
 
-    <div v-if="USE_MOCK" class="demo-tools">
+    <div v-if="isMock()" class="demo-tools">
       <button type="button" @click="simulateRemote">模拟别人改了这条（看黄条）</button>
     </div>
   </main>
