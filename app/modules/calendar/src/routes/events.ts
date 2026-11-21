@@ -103,7 +103,7 @@ export async function patchEvent(c: Context<AppEnv>): Promise<Response> {  const
   return c.json({ event, version: event.version });
 }
 
-/** 只读详情：查组交付前的自测通道，软删一律 404，口径同 PATCH。 */
+/** 详情读接口：归模块自有，变更流只给 eventId，撞车对比要拿完整日程；软删一律 404，口径同 PATCH。 */
 export async function getEvent(c: Context<AppEnv>): Promise<Response> {
   const blocked = await requireAuth(c);
   if (blocked) return blocked;
