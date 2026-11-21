@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import type { CalendarEvent, EventChange, EventStatus } from '../../../src/types'
 
-/** 接口客户端：mock 模式走内存假数据，真接口在 .env.local 里写 VITE_USE_MOCK=false 即可切换。 */
-export const USE_MOCK = import.meta.env.VITE_USE_MOCK !== 'false'
+import { isMock } from './mode'
+
+/** 接口客户端：mock 走内存假数据，live 打模块后端，模式由 mode.ts 决定。 */
 
 /** 真接口前缀：默认空串表示跟当前页面同源，/m/calendar 前缀由宿主剥掉。 */
 const API_BASE = import.meta.env.VITE_API_BASE ?? ''
@@ -121,7 +122,7 @@ export function mockReset(): void {
 }
 
 export async function fetchEvent(id: string): Promise<CalendarEvent> {
-  if (USE_MOCK) {
+  if (isMock()) {
     loadMock()
     if (!mockEvent || mockEvent.id !== id) throw new ApiError('not_found', 404)
     return { ...mockEvent }
@@ -136,7 +137,7 @@ export async function fetchEvent(id: string): Promise<CalendarEvent> {
 }
 
 export async function patchEvent(id: string, patch: EventPatch): Promise<CalendarEvent> {
-  if (USE_MOCK) {
+  if (isMock()) {
     loadMock()
     if (!mockEvent || mockEvent.id !== id) throw new ApiError('not_found', 404)
     if (patch.version !== mockEvent.version) {
@@ -172,7 +173,7 @@ export async function patchEvent(id: string, patch: EventPatch): Promise<Calenda
 }
 
 export async function fetchChanges(since: number): Promise<ChangesResult> {
-  if (USE_MOCK) {
+  if (isMock()) {
     const rows = mockChanges.filter((c) => c.createdAt >= since)
     const cursor = rows.length > 0 ? Math.max(since, rows[rows.length - 1]!.createdAt) : since
     return { changes: [...rows], cursor }

@@ -3,6 +3,7 @@
 import { computed } from 'vue'
 import type { CalendarEvent } from '../../../src/types'
 import type { EditableDraft } from '../lib/validate'
+import { toZonedShort } from '../lib/time'
 
 const props = defineProps<{
   actorName?: string
@@ -39,10 +40,15 @@ const statusLabels: Record<string, string> = {
   cancelled: '取消',
 }
 
+/** 时间按最新值的时区显示，缺时区才退回浏览器本地。 */
 function formatTime(ms: number): string {
-  const d = new Date(ms)
-  const pad = (n: number) => String(n).padStart(2, '0')
-  return `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
+  const tz = props.latest?.timezone
+  if (!tz) {
+    const d = new Date(ms)
+    const pad = (n: number) => String(n).padStart(2, '0')
+    return `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
+  }
+  return toZonedShort(ms, tz)
 }
 
 function displayValue(field: string, value: unknown): string {
