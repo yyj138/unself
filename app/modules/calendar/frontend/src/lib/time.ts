@@ -2,8 +2,6 @@
 
 /** 按期次时区渲染与解析时间，避免落到浏览器本地时区。 */
 
-const pad = (n: number): string => String(n).padStart(2, '0')
-
 type TimeParts = { year: string; month: string; day: string; hour: string; minute: string }
 
 const partsOf = (ms: number, timeZone: string): TimeParts => {
@@ -47,5 +45,3 @@ export function fromZonedInput(input: string, timeZone: string): number {
   const guess = asUtc - zoneOffsetMs(timeZone, asUtc)
   return asUtc - zoneOffsetMs(timeZone, guess)
 }
-
-export { pad }

@@ -114,13 +114,6 @@ export function mockSimulateRemoteEdit(fields: string[], actorName = '同学 A')
   mockChangeId += 1
 }
 
-/** 演示用：把内存状态恢复原样。 */
-export function mockReset(): void {
-  mockEvent = null
-  mockChanges = []
-  mockChangeId = 0
-}
-
 export async function fetchEvent(id: string): Promise<CalendarEvent> {
   if (isMock()) {
     loadMock()
