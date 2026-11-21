@@ -4,7 +4,7 @@ import { dirname, join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath } from 'node:url';
 
-/** 最小 D1 适配器 + 迁移加载（真 node:sqlite，零新依赖）：真库跑真迁移，不用假 D1；跨包 import workbench 工厂会因 SQLInputValue 与 D1 声明不同源而类型冲突。 */
+/** 最小 D1 适配器：真 node:sqlite 跑真迁移，避开跨包类型冲突。 */
 
 // 不用 new URL：workers-types 与 node:url 的 URL 声明不同源，只能走 dirname + join
 export const CALENDAR_MIGRATIONS_DIR = join(

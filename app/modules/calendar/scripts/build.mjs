@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-/** 发布产物：bundle src/index.ts 成 dist/worker.js，并用 contracts 的 schema 校验 manifest.yaml 生成 dist/manifest.json；路径用 fileURLToPath 避免 Windows 下 new URL 的盘符问题。 */
+/** 打包 src 成 dist/worker.js，并校验 manifest 生成 dist/manifest.json。 */
 import { build } from 'esbuild';
 import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
