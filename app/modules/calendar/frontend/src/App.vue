@@ -80,12 +80,13 @@ function onSaved(updated: CalendarEvent): void {
 /** 保存撞到 409：用返回的最新值弹对比横幅，不自动覆盖。 */
 function onConflict(payload: {
   latest: CalendarEvent
+  actorName?: string | null
   fields: string[]
   patch: EventPatch
   draft: EditableDraft
 }): void {
   banner.value = {
-    actorName: '其他人',
+    actorName: payload.actorName ?? '其他人',
     fields: payload.fields,
     latest: payload.latest,
     retry: { patch: payload.patch, draft: payload.draft },
@@ -105,7 +106,7 @@ async function onRetry(): Promise<void> {
     if (err instanceof VersionConflictError) {
       // 又撞车：更新对比值，继续让用户选
       banner.value = {
-        actorName: '其他人',
+        actorName: err.actorName ?? '其他人',
         fields: diffEditableFields(draft, err.event),
         latest: err.event,
         retry: { patch, draft },
