@@ -67,6 +67,23 @@ export async function insertChange(
     .run();
 }
 
+/** 该日程最近一条变更的操作者名，供 409 让前端显示撞车的人。 */
+export async function findLatestActorName(
+  db: D1Database,
+  eventId: string,
+): Promise<string | null> {
+  const row = await db
+    .prepare(
+      `SELECT actor_name FROM calendar_event_changes
+        WHERE event_id = ?
+        ORDER BY created_at DESC, id DESC
+        LIMIT 1`,
+    )
+    .bind(eventId)
+    .first<{ actor_name: string }>();
+  return row?.actor_name ?? null;
+}
+
 /** 变更流：since 之后（含当毫秒）的流水，可排除某条日程；重复尾由前端去重。 */
 export async function listChanges(
   db: D1Database,

@@ -18,11 +18,12 @@ function authHeaders(): Record<string, string> {
   return token ? { Authorization: `Bearer ${token}` } : {}
 }
 
-/** 服务端返回的冲突信息：409 时抛这个错，带上服务端当前值。 */
+/** 服务端返回的冲突信息：409 时抛这个错，带上服务端当前值与最近改动人。 */
 export class VersionConflictError extends Error {
   constructor(
     public readonly event: CalendarEvent,
     public readonly version: number,
+    public readonly actorName: string | null = null,
   ) {
     super('version_conflict')
     this.name = 'VersionConflictError'
@@ -157,8 +158,8 @@ export async function patchEvent(id: string, patch: EventPatch): Promise<Calenda
   })
   if (res.status === 401) throw new AuthExpiredError()
   if (res.status === 409) {
-    const body = (await res.json()) as { event: CalendarEvent; version: number }
-    throw new VersionConflictError(body.event, body.version)
+    const body = (await res.json()) as { event: CalendarEvent; version: number; actorName?: string | null }
+    throw new VersionConflictError(body.event, body.version, body.actorName ?? null)
   }
   if (res.status === 400) {
     // 后端校验失败带 error 码和可选 field，交给界面翻成中文定位问题

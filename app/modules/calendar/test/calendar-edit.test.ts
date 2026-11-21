@@ -6,6 +6,7 @@ import {
   authHeaders,
   createCalendarDb,
   mintSetup,
+  seedChange,
   seedEvent,
   type CalendarTestDb,
 } from './calendar-test-factory.ts';
@@ -311,5 +312,51 @@ describe('认证：按装配器注入的实例 id 校验 aud', () => {
 
     const res = await patchEvent('evt_aud_default', { title: '新标题', version: 1 }, authHeaders(token));
     expect(res.status).toBe(200);
+  });
+});
+
+describe('PATCH 409：带回最近改动人', () => {
+  it('别人改过且版本过期 → 409 带 actorName', async () => {
+    const { makeToken } = await mintSetup(env);
+    const token = await makeToken({ sub: 'u_a', name: '黄一' });
+    seedEvent(db, { id: 'evt_conf', organizerId: 'u_a', version: 2 });
+    seedChange(db, { id: 'ch_1', eventId: 'evt_conf', actorName: '黄二', toVersion: 2, createdAt: 1_700_000_000_500 });
+
+    const res = await patchEvent('evt_conf', { title: '新标题', version: 1 }, authHeaders(token));
+    expect(res.status).toBe(409);
+    const body = (await res.json()) as { actorName: string | null };
+    expect(body.actorName).toBe('黄二');
+  });
+});
+
+describe('软删口径', () => {
+  it('已软删日程 PATCH → 404', async () => {
+    const { makeToken } = await mintSetup(env);
+    const token = await makeToken({ sub: 'u_a' });
+    seedEvent(db, { id: 'evt_del', organizerId: 'u_a', version: 1, deletedAt: 1_700_000_000_900 });
+
+    const res = await patchEvent('evt_del', { title: '新标题', version: 1 }, authHeaders(token));
+    expect(res.status).toBe(404);
+  });
+
+  it('已软删日程 GET → 404', async () => {
+    const { makeToken } = await mintSetup(env);
+    const token = await makeToken({ sub: 'u_a' });
+    seedEvent(db, { id: 'evt_del2', organizerId: 'u_a', version: 1, deletedAt: 1_700_000_000_900 });
+
+    const res = await app.request('https://calendar.example/api/events/evt_del2', { headers: authHeaders(token) }, env);
+    expect(res.status).toBe(404);
+  });
+});
+
+describe('变更流水 id', () => {
+  it('21 位 URL-safe 字符集', async () => {
+    const { makeToken } = await mintSetup(env);
+    const token = await makeToken({ sub: 'u_a', name: '黄一' });
+    seedEvent(db, { id: 'evt_rid', organizerId: 'u_a', version: 1 });
+
+    await patchEvent('evt_rid', { title: '新标题', version: 1 }, authHeaders(token));
+    const id = db.first<{ id: string }>('SELECT id FROM calendar_event_changes')?.id ?? '';
+    expect(id).toMatch(/^[0-9A-Za-z_-]{21}$/);
   });
 });

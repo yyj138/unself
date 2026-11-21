@@ -1,23 +1,26 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import type { Context } from 'hono';
 import { requireAuth, type AppEnv } from '../auth';
-import { findEvent, insertChange, updateEventConditional } from '../events/store';
+import { findEvent, findLatestActorName, insertChange, updateEventConditional } from '../events/store';
 import { validatePatch } from '../events/validate';
 import { rowToEvent } from '../types';
 
 /** PATCH 顺序固定：验 token → 查记录（软删 404）→ 判组织者 → 校验 → 条件更新 → 写流水。先判组织者再校验，否则非组织者能从 400/409 的差别探出字段内容。 */
 
-/** 21 位随机 id（变更流水用；事件 id 由增组写入，模块不生成）。 */
+/** 21 位 URL-safe id，字符集与接口文档的 nanoid 口径一致。 */
 function newChangeId(): string {
-  const bytes = crypto.getRandomValues(new Uint8Array(16));
-  return Array.from(bytes)
-    .map((b) => b.toString(16).padStart(2, '0'))
-    .join('')
-    .slice(0, 21);
+  const alphabet = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz-_';
+  const bytes = crypto.getRandomValues(new Uint8Array(21));
+  return Array.from(bytes, (b) => alphabet[b % alphabet.length]).join('');
 }
 
-export async function patchEvent(c: Context<AppEnv>): Promise<Response> {
-  const blocked = await requireAuth(c);
+/** 409 统一体：当前 event、version 与最近改动人，前端据此显示撞车人。 */
+async function conflict(c: Context<AppEnv>, event: ReturnType<typeof rowToEvent>): Promise<Response> {
+  const actorName = await findLatestActorName(c.env.DB, event.id);
+  return c.json({ error: 'version_conflict', event, version: event.version, actorName }, 409);
+}
+
+export async function patchEvent(c: Context<AppEnv>): Promise<Response> {  const blocked = await requireAuth(c);
   if (blocked) return blocked;
   const claims = c.get('claims');
   const id = c.req.param('id') ?? '';
@@ -50,8 +53,7 @@ export async function patchEvent(c: Context<AppEnv>): Promise<Response> {
   if (result.changedFields.length === 0) {
     if (result.patch.version !== row.version) {
       const latest = (await findEvent(c.env.DB, id)) ?? row;
-      const event = rowToEvent(latest);
-      return c.json({ error: 'version_conflict', event, version: event.version }, 409);
+      return await conflict(c, rowToEvent(latest));
     }
     return c.json({ event: before, version: before.version });
   }
@@ -72,7 +74,7 @@ export async function patchEvent(c: Context<AppEnv>): Promise<Response> {
       return c.json({ error: 'not_found' }, 404);
     }
     const event = rowToEvent(latest);
-    return c.json({ error: 'version_conflict', event, version: event.version }, 409);
+    return await conflict(c, event);
   }
 
   // 变更记录是独立 INSERT：写失败也不影响主表正确性，只少一条提示记录
