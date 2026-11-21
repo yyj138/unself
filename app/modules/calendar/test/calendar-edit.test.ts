@@ -283,10 +283,10 @@ describe('认证：CORE_ISSUER 对 iss 的实际校验', () => {
   });
 });
 
-describe('认证：实例 id 覆盖 aud', () => {
-  it('配了 CORE_AUDIENCE 且 token 的 aud 与之一致 → 200', async () => {
+describe('认证：按装配器注入的实例 id 校验 aud', () => {
+  it('MODULE_ID=team-calendar 且 token aud 与之一致 → 200', async () => {
     const { makeToken } = await mintSetup(env);
-    env.CORE_AUDIENCE = 'team-calendar';
+    env.MODULE_ID = 'team-calendar';
     const token = await makeToken({ sub: 'u_a', name: '黄一', aud: 'team-calendar' });
     seedEvent(db, { id: 'evt_aud_ok', organizerId: 'u_a', version: 1 });
 
@@ -294,9 +294,9 @@ describe('认证：实例 id 覆盖 aud', () => {
     expect(res.status).toBe(200);
   });
 
-  it('配了 CORE_AUDIENCE 但 token 的 aud 仍是 calendar → 401', async () => {
+  it('MODULE_ID=team-calendar 但 token 的 aud 仍是 calendar → 401', async () => {
     const { makeToken } = await mintSetup(env);
-    env.CORE_AUDIENCE = 'team-calendar';
+    env.MODULE_ID = 'team-calendar';
     const token = await makeToken({ sub: 'u_a', name: '黄一' });
     seedEvent(db, { id: 'evt_aud_bad', organizerId: 'u_a', version: 1 });
 
@@ -304,7 +304,7 @@ describe('认证：实例 id 覆盖 aud', () => {
     expect(res.status).toBe(401);
   });
 
-  it('没配 CORE_AUDIENCE 时回落到 manifest.id，aud=calendar → 200', async () => {
+  it('没注 MODULE_ID 时回落 manifest.id，aud=calendar → 200', async () => {
     const { makeToken } = await mintSetup(env);
     const token = await makeToken({ sub: 'u_a', name: '黄一' });
     seedEvent(db, { id: 'evt_aud_default', organizerId: 'u_a', version: 1 });
