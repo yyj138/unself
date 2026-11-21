@@ -5,6 +5,9 @@ import { AuthExpiredError, fetchChanges } from './api'
 
 const POLL_INTERVAL = 3000
 
+/** 其它日程的变更计数：先累计给界面提示，做列表时再改成按需拉取。 */
+const pendingCount = ref(0)
+
 /** 每 3 秒拉变更流，游标推进、按 eventId 去重；切后台暂停切回补拉，自己产生的变更按版本过滤。 */
 export function useEventChanges(options: {
   eventId: string
@@ -25,8 +28,11 @@ export function useEventChanges(options: {
         const seen = latestByEvent.get(change.eventId) ?? 0
         if (change.toVersion <= seen) continue
         latestByEvent.set(change.eventId, change.toVersion)
-        // TODO(做日程列表时再处理)：其它日程的变更在这里被丢弃，但 cursor 已推进，届时会漏
-        if (change.eventId !== options.eventId) continue
+        // 其它日程的变更只计数，做列表时改为直接消费
+        if (change.eventId !== options.eventId) {
+          pendingCount.value += 1
+          continue
+        }
         // 自己保存产生的变更，版本号不比本地新，不提示（等价于 excludeEventId 的目的）
         if (change.toVersion <= options.getVersion()) continue
         options.onHit(change)
@@ -65,5 +71,5 @@ export function useEventChanges(options: {
     stop()
   })
 
-  return { poll }
+  return { poll, pendingCount }
 }

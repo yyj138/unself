@@ -35,14 +35,15 @@ npx vite --port 5175 --strictPort
 
 ## 切真接口
 
-在 `frontend/` 下新建 `.env.local`（不入库）：
+默认不用配。页面启动时先试着和壳握手，1.5 秒内拿到 token 就走真接口，没壳则回落 mock。
+
+想强制某个模式，在 `frontend/` 下建 `.env.local`（不入库）：
 
 ```
 VITE_USE_MOCK=false
-VITE_API_BASE=
 ```
 
-- `VITE_USE_MOCK=false` 才切真接口；不写或写别的值都走 mock。
+- `VITE_USE_MOCK=false` 强制真接口，`true` 强制 mock，不写就自动探测。
 - `VITE_API_BASE` 默认空串表示跟当前页面同源；`/m/calendar` 前缀由宿主剥掉，不要写死 `localhost:8788`。
 
-改完重启 vite。真接口模式下页面启动时会先走 SDK 握手拿 token，所以要通过工作台或上面的假壳页打开，直接开 `/` 会因没有壳响应而超时。
+真接口模式下页面要先走 SDK 握手拿 token，所以要通过工作台或上面的假壳页打开。
