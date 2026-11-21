@@ -13,7 +13,7 @@
 ## 接口
 
 - `PATCH /api/events/:id`：改字段，必带 `version`；200 回 `{ event, version }`，409 回 `{ error: version_conflict, event, version, actorName }`
-- `GET /api/events/:id`：读详情，软删一律 404
+- `GET /api/events/:id`：读详情，软删一律 404。归模块自有：变更流只给 eventId，撞车对比必须靠它取完整日程；后续查组若有详情接口再统一口径。
 - `GET /api/changes?since=`：变更流，`since` 含当毫秒，cursor 只前进，单次上限 200
 - `GET /api/health`、`GET /life/export`、`POST /life/purge`：平台约定接口
 
