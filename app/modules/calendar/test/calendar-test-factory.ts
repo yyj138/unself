@@ -14,12 +14,7 @@ import {
   createD1Adapter,
 } from './calendar-d1.ts';
 
-/**
- * 日历模块测试工厂：真 SQLite（node:sqlite）+ 真迁移 + 最小 D1 适配器。
- *
- * 适配器在同目录的 calendar-d1.ts（不用跨包 import workbench 的工厂，原因见那里的注释）；
- * 不手搓假 D1，SQL 漏 WHERE、引用幻影列这类问题在真库上当场抛错（docs/testing.md 禁项 / #60）。
- */
+/** 测试工厂：真 SQLite + 真迁移 + 最小 D1 适配器（适配器见 calendar-d1.ts，不用假 D1）。 */
 
 /** 测试里绑定的参数类型（node:sqlite 的 SQLInputValue 常用子集）。 */
 type Bindable = string | number | null;
@@ -126,10 +121,7 @@ export function seedChange(
   );
 }
 
-/**
- * 签发侧：每用例一把新 ES256 keypair，公钥以 JWKS 注入 env（与部署装配期同形）。
- * aud 固定为 calendar——这是模块边界，不能跨模块重放。
- */
+/** 签发侧：每用例一把 ES256 密钥，公钥按 JWKS 注入 env；aud 固定 calendar，不能跨模块重放。 */
 export interface MintSetup {
   makeToken: (overrides?: Record<string, unknown>, expOffset?: number) => Promise<string>;
   signWithForeignKey: () => Promise<string>;

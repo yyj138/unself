@@ -11,12 +11,7 @@ import {
 } from '../types';
 import type { EventRow } from '../types';
 
-/**
- * 编辑请求的校验（A-2）。
- *
- * 只认 API 名（`startAt`），不认数据库列名（`start_at`）；只读字段、未知字段一律拒绝，
- * 不做忽略未知字段的宽容处理——字段名写错在前端排查成本远高于一次 400。
- */
+/** 编辑请求校验（A-2）：只认 API 名不认列名，只读与未知字段一律拒绝，不做宽容处理。 */
 
 /** 通过校验的补丁：只含请求里真的出现的字段，另带并发令牌。 */
 export interface EventPatch {
@@ -79,11 +74,7 @@ function isInteger(value: unknown): value is number {
   return typeof value === 'number' && Number.isInteger(value) && Number.isFinite(value);
 }
 
-/**
- * 校验 PATCH 请求体，并合并到现有记录上得出最终值。
- * @param raw 请求体（不可信）
- * @param base 当前记录（调用方已确认存在且未删除）
- */
+/** 校验 PATCH 请求体并合并出最终值：raw 不可信，base 已确认存在且未删除。 */
 export function validatePatch(raw: unknown, base: EventRow): ValidateResult {
   if (!isPlainObject(raw)) {
     return fail('body_must_be_object');
@@ -185,22 +176,12 @@ export function validatePatch(raw: unknown, base: EventRow): ValidateResult {
     return fail('start_must_be_before_end', patch.startAt !== undefined ? 'startAt' : 'endAt');
   }
 
-  // 合并出最终值（响应与变更记录都用它）
-  const next: CalendarEvent = {
-    ...baseEvent,
-    ...(patch.title !== undefined ? { title: patch.title } : {}),
-    ...(touched.includes('description') ? { description: patch.description ?? null } : {}),
-    ...(touched.includes('location') ? { location: patch.location ?? null } : {}),
-    ...(touched.includes('startAt') ? { startAt: patch.startAt as number } : {}),
-    ...(touched.includes('endAt') ? { endAt: patch.endAt as number } : {}),
-    ...(touched.includes('allDay') ? { allDay: patch.allDay as boolean } : {}),
-    ...(touched.includes('timezone') ? { timezone: patch.timezone as string } : {}),
-    ...(touched.includes('status') ? { status: patch.status as EventStatus } : {}),
-    ...(touched.includes('responseState')
-      ? { responseState: (patch.responseState as ResponseState | null) ?? null }
-      : {}),
-    ...(touched.includes('rrule') ? { rrule: patch.rrule ?? null } : {}),
-  };
+  // 合并出最终值：被改动的字段覆盖到 base 上（?? null 不会把 false/0 变成 null）
+  const next: CalendarEvent = { ...baseEvent };
+  const merged = next as unknown as Record<string, unknown>;
+  for (const field of touched) {
+    merged[field] = patch[field] ?? null;
+  }
 
   const changedFields = diffFields(baseEvent, next);
 

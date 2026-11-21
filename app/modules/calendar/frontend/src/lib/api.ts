@@ -1,12 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import type { CalendarEvent, EventChange, EventStatus } from '../../../src/types'
 
-/**
- * 阶段 2 的接口客户端。
- *
- * mock 模式：不发网络请求，用内存里的一份假日程和假变更流跑通 409 / 轮询 / 黄条。
- * 切真接口时在 frontend/.env.local 里写 VITE_USE_MOCK=false，组件不用动。
- */
+/** 接口客户端：mock 模式走内存假数据，真接口在 .env.local 里写 VITE_USE_MOCK=false 即可切换。 */
 export const USE_MOCK = import.meta.env.VITE_USE_MOCK !== 'false'
 
 /** 真接口前缀：默认空串表示跟当前页面同源，/m/calendar 前缀由宿主剥掉。 */
@@ -23,11 +18,12 @@ function authHeaders(): Record<string, string> {
   return token ? { Authorization: `Bearer ${token}` } : {}
 }
 
-/** 服务端返回的冲突信息：409 时抛这个错，带上服务端当前值。 */
+/** 服务端返回的冲突信息：409 时抛这个错，带上服务端当前值与最近改动人。 */
 export class VersionConflictError extends Error {
   constructor(
     public readonly event: CalendarEvent,
     public readonly version: number,
+    public readonly actorName: string | null = null,
   ) {
     super('version_conflict')
     this.name = 'VersionConflictError'
@@ -162,8 +158,8 @@ export async function patchEvent(id: string, patch: EventPatch): Promise<Calenda
   })
   if (res.status === 401) throw new AuthExpiredError()
   if (res.status === 409) {
-    const body = (await res.json()) as { event: CalendarEvent; version: number }
-    throw new VersionConflictError(body.event, body.version)
+    const body = (await res.json()) as { event: CalendarEvent; version: number; actorName?: string | null }
+    throw new VersionConflictError(body.event, body.version, body.actorName ?? null)
   }
   if (res.status === 400) {
     // 后端校验失败带 error 码和可选 field，交给界面翻成中文定位问题
@@ -175,20 +171,13 @@ export async function patchEvent(id: string, patch: EventPatch): Promise<Calenda
   return body.event
 }
 
-export async function fetchChanges(
-  since: number,
-  excludeEventId?: string,
-): Promise<ChangesResult> {
+export async function fetchChanges(since: number): Promise<ChangesResult> {
   if (USE_MOCK) {
-    // 注意：真接口按 A 的约定用 excludeEventId 排除整条 event 的变更，
-    // 但那样会连「别人改了我正在编辑的这条」也一起排除，黄条弹不出来。
-    // 这个分歧已在 issue #6 提出；mock 阶段先不排除，保证提前提示能演示。
     const rows = mockChanges.filter((c) => c.createdAt >= since)
     const cursor = rows.length > 0 ? Math.max(since, rows[rows.length - 1]!.createdAt) : since
     return { changes: [...rows], cursor }
   }
   const params = new URLSearchParams({ since: String(since) })
-  if (excludeEventId) params.set('excludeEventId', excludeEventId)
   const res = await fetch(`${API_BASE}/api/events/changes?${params.toString()}`, {
     headers: authHeaders(),
   })

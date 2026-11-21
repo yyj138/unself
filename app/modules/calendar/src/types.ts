@@ -1,12 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-/**
- * 日历改功能的字段契约。
- *
- * 两套命名各管一段：数据库列是 snake_case（`start_at`），对外 API 一律 camelCase
- * （`startAt`）——这是和查/增/删三组共用的硬约定，任何一侧都不许直接透出另一侧的名字。
- * 时间统一存 UTC 毫秒（INTEGER），时区另存 IANA 名，不存本地时间字符串。
- */
+/** 字段契约：库里 snake_case、对外一律 camelCase（与增删查共用）；时间存 UTC 毫秒，时区另存 IANA 名。 */
 
 /** 标题长度上限（校验口径，前后端同源）。 */
 export const MAX_TITLE_LENGTH = 200;

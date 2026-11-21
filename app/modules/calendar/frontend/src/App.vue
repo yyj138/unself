@@ -80,12 +80,13 @@ function onSaved(updated: CalendarEvent): void {
 /** 保存撞到 409：用返回的最新值弹对比横幅，不自动覆盖。 */
 function onConflict(payload: {
   latest: CalendarEvent
+  actorName?: string | null
   fields: string[]
   patch: EventPatch
   draft: EditableDraft
 }): void {
   banner.value = {
-    actorName: '其他人',
+    actorName: payload.actorName ?? '其他人',
     fields: payload.fields,
     latest: payload.latest,
     retry: { patch: payload.patch, draft: payload.draft },
@@ -105,7 +106,7 @@ async function onRetry(): Promise<void> {
     if (err instanceof VersionConflictError) {
       // 又撞车：更新对比值，继续让用户选
       banner.value = {
-        actorName: '其他人',
+        actorName: err.actorName ?? '其他人',
         fields: diffEditableFields(draft, err.event),
         latest: err.event,
         retry: { patch, draft },
@@ -138,7 +139,7 @@ function simulateRemote(): void {
 <template>
   <main class="page">
     <h1 class="page-title">日历 · 编辑日程</h1>
-    <p class="page-note">阶段 2：mock 演示，保存走假接口，撞车弹对比横幅。</p>
+    <p class="page-note">{{ USE_MOCK ? 'mock 演示：保存走假接口，撞车弹对比横幅。' : '真接口模式：数据读写走模块后端。' }}</p>
 
     <p v-if="handshakeError" class="msg err">{{ handshakeError }}</p>
     <p v-if="!handshakeReady && !handshakeError" class="msg">正在连接平台…</p>
@@ -165,7 +166,7 @@ function simulateRemote(): void {
       @auth-expired="authExpired = true"
     />
 
-    <div class="demo-tools">
+    <div v-if="USE_MOCK" class="demo-tools">
       <button type="button" @click="simulateRemote">模拟别人改了这条（看黄条）</button>
     </div>
   </main>

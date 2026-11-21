@@ -2,10 +2,7 @@
 import { createModuleSDK, resolveShellOrigin } from '@unself/sdk'
 import type { ModuleSDK } from '@unself/sdk'
 
-/**
- * 日历模块 SDK 会话：ready 握手 → 壳下发 token → 静默续期。
- * 精简自 chat 的 session.ts，只留日历用得到的 token 通道；token 只存内存。
- */
+/** 日历 SDK 会话：ready 握手拿 token 后静默续期，token 只存内存。 */
 export interface CalendarSession {
   sdk: ModuleSDK
   getToken(): string | null

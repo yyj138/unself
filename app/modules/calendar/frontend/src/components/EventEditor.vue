@@ -8,7 +8,7 @@ import { describeApiError, diffEditableFields, validateDraft } from '../lib/vali
 const props = defineProps<{ event: CalendarEvent }>()
 const emit = defineEmits<{
   saved: [event: CalendarEvent]
-  conflict: [payload: { latest: CalendarEvent; fields: string[]; patch: EventPatch; draft: Draft }]
+  conflict: [payload: { latest: CalendarEvent; actorName: string | null; fields: string[]; patch: EventPatch; draft: Draft }]
   'auth-expired': []
 }>()
 
@@ -88,6 +88,7 @@ async function onSave(): Promise<void> {
     if (err instanceof VersionConflictError) {
       emit('conflict', {
         latest: err.event,
+        actorName: err.actorName,
         fields: diffEditableFields(draft, err.event),
         // 留住提交前这份 patch，供「用我的重试」拿新 version 再发一次
         patch,

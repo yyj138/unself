@@ -4,13 +4,7 @@ import { requireAuth, type AppEnv } from '../auth';
 import { listChanges as listChangeRows } from '../events/store';
 import type { EventChange } from '../types';
 
-/**
- * 变更流（A-4）：GET /api/events/changes?since=<毫秒>&excludeEventId=<id>
- *
- * 前端每 3 秒拉一次，用返回的 cursor 推进。since 用含当毫秒的语义，同一毫秒里的多条
- * 记录一次全给；重复的尾巴由前端按 eventId 去重并取最大版本（硬约定第 4 条）。
- * 单次最多 200 条，够一次 3 秒窗口内所有人在同一个团队里的编辑量。
- */
+/** 变更流（A-4）：前端每 3 秒拉一次按 cursor 推进；since 含当毫秒，单次上限 200，重复尾由前端去重（硬约定第 4 条）。 */
 
 const MAX_CHANGES = 200;
 
