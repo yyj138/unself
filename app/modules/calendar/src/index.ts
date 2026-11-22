@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { Hono } from 'hono';
-import { type AppEnv } from './auth';
+import { DEFAULT_MODULE_ID, type AppEnv } from './auth';
 import { exportData, purgeData } from './life';
 import { listChanges } from './routes/changes';
 import { getEvent, patchEvent } from './routes/events';
@@ -8,6 +8,14 @@ import { getEvent, patchEvent } from './routes/events';
 /** 模块入口：只挂载路由与生命周期端点，业务实现放各自文件，避免多人改同一处。 */
 
 const app = new Hono<AppEnv>();
+
+/** 装配器把专属库绑成 <实例 id>_DB，本地与测试绑 DB，这里统一成 DB。 */
+app.use('*', async (c, next) => {
+  const key = `${(c.env.MODULE_ID ?? DEFAULT_MODULE_ID).toUpperCase().replaceAll('-', '_')}_DB`;
+  const alt = (c.env as unknown as Record<string, D1Database | undefined>)[key];
+  if (!c.env.DB && alt) c.env.DB = alt;
+  await next();
+});
 
 app.get('/api/health', (c) => c.json({ ok: true, service: 'module-calendar' }));
 
