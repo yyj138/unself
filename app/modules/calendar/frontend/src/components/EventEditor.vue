@@ -52,8 +52,7 @@ onBeforeUnmount(() => {
   if (savedTimer) clearTimeout(savedTimer)
 })
 
-// 外部换日程时回流字段；不在这里清 saved，否则 emit('saved') 触发的回流会把刚亮的「已保存」抹掉。
-// 「已保存」统一由 flashSaved 的 2 秒定时器清除。
+// 回流只覆盖字段，不清 saved；绿字统一由 flashSaved 的 2 秒定时器熄灭
 watch(() => props.event, (e) => {
   title.value = e.title
   description.value = e.description ?? ''
