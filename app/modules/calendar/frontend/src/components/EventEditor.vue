@@ -1,6 +1,6 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { onBeforeUnmount, ref, watch } from 'vue'
 import type { CalendarEvent, EventStatus } from '../../../src/types'
 import { ApiError, AuthExpiredError, patchEvent, VersionConflictError, type EventPatch } from '../lib/api'
 import { describeApiError, diffEditableFields, validateDraft } from '../lib/validate'
@@ -40,7 +40,20 @@ const status = ref<EventStatus>(props.event.status)
 const error = ref('')
 const saved = ref(false)
 const saving = ref(false)
+let savedTimer: ReturnType<typeof setTimeout> | undefined
 
+function flashSaved(): void {
+  saved.value = true
+  if (savedTimer) clearTimeout(savedTimer)
+  savedTimer = setTimeout(() => { saved.value = false }, 2000)
+}
+
+onBeforeUnmount(() => {
+  if (savedTimer) clearTimeout(savedTimer)
+})
+
+// 外部换日程时回流字段；不在这里清 saved，否则 emit('saved') 触发的回流会把刚亮的「已保存」抹掉。
+// 「已保存」统一由 flashSaved 的 2 秒定时器清除。
 watch(() => props.event, (e) => {
   title.value = e.title
   description.value = e.description ?? ''
@@ -48,7 +61,6 @@ watch(() => props.event, (e) => {
   startLocal.value = toZonedInput(e.startAt, e.timezone)
   endLocal.value = toZonedInput(e.endAt, e.timezone)
   status.value = e.status
-  saved.value = false
 })
 
 const statusOptions: EventStatus[] = ['confirmed', 'tentative', 'cancelled']
@@ -56,6 +68,7 @@ const statusOptions: EventStatus[] = ['confirmed', 'tentative', 'cancelled']
 async function onSave(): Promise<void> {
   error.value = ''
   saved.value = false
+  if (savedTimer) clearTimeout(savedTimer)
 
   const draft = {
     title: title.value.trim(),
@@ -81,7 +94,7 @@ async function onSave(): Promise<void> {
   saving.value = true
   try {
     const updated = await patchEvent(props.event.id, patch)
-    saved.value = true
+    flashSaved()
     // 把服务端的 version 写回本地状态，下次保存带新的，避免旧 patch 白白撞 409
     emit('saved', updated)
   } catch (err) {
