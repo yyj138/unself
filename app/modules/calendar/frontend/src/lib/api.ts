@@ -134,7 +134,7 @@ export async function patchEvent(id: string, patch: EventPatch): Promise<Calenda
     loadMock()
     if (!mockEvent || mockEvent.id !== id) throw new ApiError('not_found', 404)
     if (patch.version !== mockEvent.version) {
-      throw new VersionConflictError({ ...mockEvent }, mockEvent.version)
+      throw new VersionConflictError({ ...mockEvent }, mockEvent.version, '同学 A')
     }
     const next: CalendarEvent = {
       ...mockEvent,
