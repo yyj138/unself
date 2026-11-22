@@ -31,6 +31,10 @@ pnpm --filter @unself/calendar-frontend dev
 
 真接口模式需在工作台或 `frontend/public/dev-shim.html` 里打开，由壳注入 token。
 
+本地 D1 不会自动跑迁移，需先执行 `migrations/calendar/0001_events.sql` 并插入测试行。
+
+PATCH 只允许改自己的日程：行上 `organizer_id` 必须等于 token 的 `sub`，否则 403。
+
 ## 校验与产物
 
 ```bash
