@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Source: aozorae/Edgechat@29978c221ee3ae641ce0b9b97851656c00714a5d worker/src/data/channels.js（GPL-3.0-only，裁剪版）
 import { userAvatarUrl } from "../profile-avatar.js";
+import { projectIdentity } from "./users.js";
 import { publicFileUrl } from "../utils.js";
 import { messagePreview } from './message-preview.js';
 
@@ -21,6 +22,8 @@ function mapVisibleChannel(row) {
 		lastMessageAt: row.last_message_at || null,
 		unreadCount: Number(row.unread_count || 0),
 			mentionUnreadCount: Number(row.attention_unread_count || 0),
+			// @all 独立红标计数（契约 4.1）；DM 走 dm-queries.js，无此字段即 0。
+			mentionAllUnreadCount: Number(row.mention_all_unread_count || 0),
 	};
 }
 
@@ -56,6 +59,12 @@ export async function listVisibleChannels(db, userId, env) {
 				   latest.attachment_key AS last_message_attachment_key,
 				   latest.attachment_name AS last_message_attachment_name,
 				   latest.attachment_kind AS last_message_attachment_kind,
+				   latest.mention_user_ids AS last_message_mention_user_ids,
+				   COALESCE((
+				     SELECT json_group_array(json_object('username', mentioned.username, 'displayName', mentioned.display_name))
+				     FROM json_each(COALESCE(latest.mention_user_ids, '[]')) mention_ids
+				     JOIN users mentioned ON mentioned.id = CAST(mention_ids.value AS INTEGER)
+				   ), '[]') AS last_message_mentions_json,
 				   CASE WHEN c.name = 'general' THEN 1 ELSE 0 END AS is_general,
 			   owner.display_name AS owner_display_name,
 			   EXISTS (SELECT 1 FROM channel_members cm WHERE cm.channel_id = c.id AND cm.user_id = ?) AS is_member,
@@ -80,7 +89,14 @@ export async function listVisibleChannels(db, userId, env) {
 					               )
 					               OR m.reply_to_sender_id = ?
 					             ))
-					     ELSE 0 END AS attention_unread_count
+					     ELSE 0 END AS attention_unread_count,
+					     -- @all 未读（契约 4.1）：只数 mention_all=1，与 attention（提及+回复）独立。
+					     CASE WHEN EXISTS (SELECT 1 FROM channel_members cm WHERE cm.channel_id = c.id AND cm.user_id = ?)
+					     THEN (SELECT COUNT(*) FROM messages m
+					           WHERE m.channel_id = c.id AND m.deleted_at IS NULL AND m.mention_all = 1
+					             AND m.id > COALESCE((SELECT mr.last_read_message_id FROM message_reads mr WHERE mr.channel_id = c.id AND mr.user_id = ?), 0)
+					             AND (m.sender_id IS NULL OR m.sender_id != ?))
+					     ELSE 0 END AS mention_all_unread_count
 				 FROM channels c
 			 LEFT JOIN users owner ON owner.id = c.created_by
 			 LEFT JOIN messages latest ON latest.id = (SELECT m.id FROM messages m WHERE m.channel_id = c.id AND m.deleted_at IS NULL ORDER BY m.id DESC LIMIT 1)
@@ -93,6 +109,9 @@ export async function listVisibleChannels(db, userId, env) {
 				   c.name ASC`,
 		)
 			.bind(
+					normalizedUserId,
+					normalizedUserId,
+					normalizedUserId,
 					normalizedUserId,
 					normalizedUserId,
 					normalizedUserId,
@@ -131,7 +150,7 @@ export async function listAdminChannels(db, { includeAvatar = true } = {}) {
 export async function listChannelMembers(db, channelId) {
 	const { results } = await db
 		.prepare(
-			`SELECT cm.user_id, cm.role, cm.joined_at, u.username, u.display_name, u.core_avatar_url, u.avatar_key
+			`SELECT cm.user_id, cm.role, cm.joined_at, u.username, u.display_name, u.core_avatar_url, u.avatar_key, u.core_login_name, u.core_email, u.core_identity_source
 			 FROM channel_members cm
 			 JOIN users u ON u.id = cm.user_id
 			 WHERE cm.channel_id = ? AND u.deleted_at IS NULL
@@ -146,5 +165,6 @@ export async function listChannelMembers(db, channelId) {
 		avatarUrl: userAvatarUrl(row.core_avatar_url, row.avatar_key),
 		role: row.role,
 		joinedAt: row.joined_at,
+		...projectIdentity(row),
 	}));
 }

@@ -5,23 +5,23 @@
  * 注册表 API（#7）持有管理员会话，装配期无会话 → 直写 module_registry（与 API 同构 upsert 语义）。
  */
 import { ModuleManifestSchema, manifestFromYamlText, type ModuleManifest } from '@unself/contracts';
+import { REGISTRY_UPSERT_WRITE_SQL } from '@unself/control-plane/sql';
+import type { DeployMode } from '@unself/control-plane/types';
 import type { UnselfConfig, ModuleRef } from './config';
 
-/** 注册表 upsert SQL（与 core-api/control-plane REGISTRY_UPSERT_SQL 同源；0012 起带落点三列，
- * 0013 起带 credential_hash（#349，8 参形态）；合并语义同源——未写保留旧值，#348 review 定案。
- * installer 不传凭证（binds 恒 NULL = 首插落 NULL / 冲突保留旧值）：反连凭证只经
- * workbench connect-register / 保存流程写入，装配合不冲掉哈希。） */
+/**
+ * 注册表 upsert 写语句（8 参形态：0012 起带落点三列，0013 起带 credential_hash（#349），
+ * 0017 起 mode 首插缺省 'direct'（#369 两态））。合并语义见 control-plane sql.ts：
+ * 未写（绑定 NULL）保留列中旧值，#348 review 定案。installer 不传凭证（binds 恒 NULL =
+ * 首插落 NULL / 冲突保留旧值）：反连凭证只经 workbench connect-register / 保存流程写入，
+ * 装配不冲掉哈希。
+ *
+ * 以前这里自带一份「与 core 逐字同构」的副本、靠注释提醒同步（唯一差异是 core 那份多一条
+ * RETURNING）。现在 control-plane 把写语句本体单独导出，四个控制面实现用的 = 本体 + RETURNING，
+ * 装配器直接用本体——结构上不可能漂移，不再有第二份 SQL。
+ */
 export function registryUpsertSql(): string {
-  return `INSERT INTO module_registry (id, enabled, version, manifest_json, mode, entry, storage_level, credential_hash)
-VALUES (?1, ?2, ?3, ?4, coalesce(?5, 'cloudflare'), ?6, ?7, ?8)
-ON CONFLICT(id) DO UPDATE SET
-  enabled = excluded.enabled,
-  version = excluded.version,
-  manifest_json = excluded.manifest_json,
-  mode = coalesce(?5, mode),
-  entry = coalesce(?6, CASE WHEN coalesce(?5, mode) = 'connect' THEN entry END),
-  storage_level = coalesce(?7, storage_level),
-  credential_hash = coalesce(?8, credential_hash)`;
+  return REGISTRY_UPSERT_WRITE_SQL;
 }
 
 /**
@@ -64,7 +64,8 @@ export function sqlString(value: string): string {
  * credential_hash 恒 NULL（#349：installer 不经手凭证；首插落 NULL，冲突分支保留已有哈希）。 */
 export function registryUpsertCommand(input: {
   manifest: ModuleManifest;
-  mode?: 'cloudflare' | 'docker' | 'connect' | null;
+  /** 接入方式（#369 两态 direct/connect）；缺省 NULL = 保留旧值，首插由 SQL 的 coalesce 落 'direct'。 */
+  mode?: DeployMode | null;
   entry?: string | null;
   storage_level?: string | null;
 }): { sql: string; binds: [string, number, string, string, string | null, string | null, string | null, string | null] } {

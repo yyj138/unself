@@ -1,6 +1,6 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
-import { computed, onBeforeUnmount, provide, ref } from 'vue'
+import { computed, onBeforeUnmount, provide, ref, watch } from 'vue'
 
 import { attachmentLoaderKey, createAttachmentLoader } from './lib/attachment-resource'
 import { createDocumentSender, type ComposerDocument } from './lib/composer-document'
@@ -9,9 +9,11 @@ import ChatLayout from './components/ChatLayout.vue'
 import Composer from './components/Composer.vue'
 import ReadReceipts from './components/ReadReceipts.vue'
 import GroupDetails from './components/GroupDetails.vue'
+import ForwardDialog, { type ForwardTarget } from './components/ForwardDialog.vue'
 import { createChatApi, type ChatApi } from './lib/api'
 import { attachInboxSocket, createChatStore, roomKeyString } from './lib/chat-store'
 import { createMockChatApi } from './lib/mock-api'
+import { forwardSuccessTickKey } from './lib/forward-events'
 import { createChatSession } from './lib/session'
 import { createChatStorage } from './lib/storage'
 import type { ChannelMember, Message, RoomKind, UserSummary } from './lib/types'
@@ -118,6 +120,58 @@ const groupDetailsError = ref('')
 const groupDetailsBusy = ref(false)
 const groupCreationError = ref('')
 
+/**
+ * 消息头像资料卡的群内身份：进频道时拉一次成员名单，建 senderId → ChannelMember 映射传给消息气泡；
+ * 拉取失败静默降级（卡片只显示昵称/句柄）。每次切频道重建，天然新鲜。
+ */
+const channelMemberMap = ref<Map<number, ChannelMember>>(new Map())
+/** 把一份频道成员名单应用到资料卡映射：只在还停留在该频道时生效（请求期间可能已切走）。 */
+function applyChannelMembers(roomId: number, members: ChannelMember[]): void {
+  const current = store.state.currentRoom
+  if (current && current.kind !== 'dm' && current.id === roomId) {
+    channelMemberMap.value = new Map(members.map((member) => [member.id, member]))
+  }
+}
+watch(
+  () => store.state.currentRoom,
+  (room) => {
+    if (!room) {
+      channelMemberMap.value = new Map()
+      return
+    }
+    if (room.kind === 'dm') return // DM 走 dmMemberMap（响应式，无需拉取）
+    void store.listChannelMembers(room.id).then((members) => {
+      applyChannelMembers(room.id, members)
+    }).catch(() => {
+      // 失败同样只降自己：无条件清空会抹掉切走后新频道已填好的映射
+      const current = store.state.currentRoom
+      if (current && current.kind !== 'dm' && current.id === room.id) {
+        channelMemberMap.value = new Map()
+      }
+    })
+  },
+  { immediate: true },
+)
+
+/**
+ * DM 资料卡映射（computed，非拉取）：对方来自会话 otherUser（openDm 先写 state.dms 再切房间），
+ * 自己来自 contacts（listContacts 不排除本人）——否则自己消息气泡的卡查不到 member，邮箱行凭空缺失。
+ * contacts 晚到也会自动补上（reactive 源）。
+ */
+const chatMemberMap = computed<Map<number, ChannelMember>>(() => {
+  const room = store.state.currentRoom
+  if (!room) return new Map()
+  if (room.kind === 'dm') {
+    const entries: ChannelMember[] = []
+    const other = store.state.dms.find((dm) => dm.id === room.id)?.otherUser
+    if (other) entries.push({ ...other, role: 'member' })
+    const me = store.state.contacts.find((user) => user.id === store.state.myUserId)
+    if (me) entries.push({ ...me, role: 'member' })
+    return new Map(entries.map((member) => [member.id, member]))
+  }
+  return channelMemberMap.value
+})
+
 function onSelect(room: { kind: RoomKind; id: number }): void {
   void store.openRoom(room, displayNameFor(room))
 }
@@ -148,6 +202,7 @@ async function onOpenGroupDetails(): Promise<void> {
   groupDetailsBusy.value = true
   try {
     groupMembers.value = await store.listChannelMembers(room.id)
+    applyChannelMembers(room.id, groupMembers.value) // 消息资料卡同步刷新（M1：打开面板即最新名单）
   } catch (error) {
     groupDetailsError.value = error instanceof Error ? error.message : String(error)
   } finally {
@@ -162,6 +217,7 @@ async function onInviteMembers(userIds: number[]): Promise<void> {
   try {
     await store.inviteChannelMembers(room.id, userIds)
     groupMembers.value = await store.listChannelMembers(room.id)
+    applyChannelMembers(room.id, groupMembers.value) // 新邀成员立即可在消息资料卡上查到身份
   } catch (error) {
     groupDetailsError.value = error instanceof Error ? error.message : String(error)
   } finally {
@@ -217,30 +273,121 @@ const audienceSize = computed(() => {
 // ---------- composer 编排 ----------
 
 const replyTo = ref<Message | null>(null)
-const uploading = ref(false)
 
-async function onSend(text: string, mentionUserIds: number[]): Promise<void> {
+// ---------- #347 转发：目标弹窗（状态由根层持有） ----------
+
+// 基幂等键随本次转发一次性生成、重试复用（H1）：失败重试时目标房间不变、键不变，
+// 服务端幂等回显挡掉已成功目标的重复落地；逐条模式的 -n 子键由服务端按序派生
+function newForwardClientMessageId(): string {
+  return globalThis.crypto?.randomUUID?.() ?? `cm-${Date.now()}-${Math.random().toString(36).slice(2)}`
+}
+const forwardState = ref<{ mode: 'single' | 'merged'; messageIds: number[]; clientMessageId: string } | null>(null)
+/** 弹窗开关与状态分离：失败后关弹窗不清 forwardState（键保留），重选同一批消息复用旧键走幂等回显。
+ * 全清只发生在成功或切房——否则同批消息隔久的「有意重发」也会被旧键回显吞掉，表现为转不出去。 */
+const forwardOpen = ref(false)
+const forwardBusy = ref(false)
+const forwardError = ref('')
+// 转发整体成功计数（MessageList 清空多选勾选；provide/inject 直达，失败不增，勾选保留可换目标重试）
+const forwardSuccessTick = ref(0)
+provide(forwardSuccessTickKey, forwardSuccessTick)
+
+/** 同一批（mode + 消息 id 集一致，id 序已由服务端归一，这里按集合比较）。 */
+function sameForwardSelection(left: { mode: 'single' | 'merged'; messageIds: number[] }, right: { mode: 'single' | 'merged'; messageIds: number[] }): boolean {
+  return left.mode === right.mode
+    && left.messageIds.length === right.messageIds.length
+    && left.messageIds.every((id) => right.messageIds.includes(id))
+}
+
+function onForward(payload: { mode: 'single' | 'merged'; messageIds: number[] }): void {
+  // 失败重试（上次提交失败且勾选同批）：复用旧幂等键，已成功目标命中服务端回显不再重复落地；
+  // 其余情况一律新键——包括成功后的有意重发，避免被旧回显吞掉。先判定再清 error，否则恒判非失败
+  const retryable = forwardError.value !== '' && forwardState.value !== null && sameForwardSelection(forwardState.value, payload)
+  const clientMessageId = retryable ? forwardState.value!.clientMessageId : newForwardClientMessageId()
+  forwardError.value = ''
+  forwardState.value = { ...payload, clientMessageId }
+  forwardOpen.value = true
+}
+
+async function onForwardConfirm(targets: ForwardTarget[]): Promise<void> {
+  if (!forwardState.value) return
+  forwardBusy.value = true
+  forwardError.value = ''
   try {
-    await store.sendMessage({ content: text, mentionUserIds })
+    await store.forwardMessages({ ...forwardState.value, targets })
+    forwardSuccessTick.value += 1
+    forwardState.value = null
+    forwardOpen.value = false
+  } catch (error) {
+    // 失败保留 forwardState（forwardOpen 由关闭路径控制），重开同批消息时复用键
+    forwardError.value = error instanceof Error ? error.message : String(error)
+  } finally {
+    forwardBusy.value = false
+  }
+}
+
+function onForwardClose(): void {
+  forwardOpen.value = false
+  // 无失败的正常取消：状态即刻清掉；有失败则保留键供重试复用（见 forwardOpen 注释）
+  if (forwardError.value === '') forwardState.value = null
+}
+const uploading = ref(false)
+/** #347 右键头像 @：Composer 实例句柄（insertMention 外部插入入口）。 */
+const composerView = ref<InstanceType<typeof Composer> | null>(null)
+
+/** 右键消息头像 @ 提及：往输入框插入 mention chip（显示 @displayName，序列化 @username）。 */
+function onMention(message: Message): void {
+  const { id, username, displayName } = message.sender
+  composerView.value?.insertMention({ id, username, displayName })
+}
+
+// 切房清引用：replyTo 指向的是上一条消息，换房后原房间已变，留着会把旧 replyMessageId 发到新房。
+// 转发失败保留的幂等键同样只属于当前消息流，切房即弃（防隔久误复用）
+watch(
+  () => store.state.currentRoom,
+  (room, previous) => {
+    if (previous && (!room || room.id !== previous.id || room.kind !== previous.kind)) {
+      replyTo.value = null
+      forwardState.value = null
+      forwardOpen.value = false
+      forwardError.value = ''
+    }
+  },
+)
+
+async function onSend(text: string, mentionUserIds: number[], mentionAll = false): Promise<void> {
+  try {
+    await store.sendMessage({ content: text, mentionUserIds, mentionAll, replyTo: replyTo.value })
     replyTo.value = null
   } catch {
     // 发送失败：sendError 已由 store 置为人话提示（发送态复原，输入不丢可重试）
   }
 }
 
+// 文档发送同样消费引用：发送前快照并立即清条（避免上传期间回复条误导）；
+// 失败恢复引用条，重试时文档仍带引用（与文本 onSend「失败保留」同语义）；
+// 用户主动中止（signal.aborted）不算失败：不恢复，中止后随手发的文本不带旧引用
+let documentReplyTo: Message | null = null
 const sendDocument = createDocumentSender({
   getRoomKey: () => store.state.currentRoom ? roomKeyString(store.state.currentRoom) : null,
   upload: (file) => store.uploadFile(file),
-  send: (input) => store.sendMessage(input),
+  send: (input) => store.sendMessage({ ...input, replyTo: documentReplyTo }),
 })
 
-async function onSendDocument(document: ComposerDocument, mentionUserIds: number[], signal: AbortSignal): Promise<void> {
+async function onSendDocument(document: ComposerDocument, mentionUserIds: number[], mentionAll: boolean, signal: AbortSignal): Promise<void> {
+  documentReplyTo = replyTo.value
+  const replyRoomKey = store.state.currentRoom ? roomKeyString(store.state.currentRoom) : null
+  replyTo.value = null
   uploading.value = true
   try {
-    await sendDocument(document, mentionUserIds, signal)
-    replyTo.value = null
+    await sendDocument(document, mentionUserIds, mentionAll, signal)
+  } catch {
+    // 中止是用户主动放弃，引用条保持清空；房间已切换也不恢复（documentReplyTo 指向旧房间，塞回新房间会发错 replyMessageId）
+    if (!signal.aborted && store.state.currentRoom && roomKeyString(store.state.currentRoom) === replyRoomKey) {
+      replyTo.value = documentReplyTo
+    }
   } finally {
     uploading.value = false
+    documentReplyTo = null
   }
 }
 
@@ -255,6 +402,7 @@ async function onSendVoice(recording: {
     if (!uploaded) return
     await store.sendMessage({
       content: '',
+      replyTo: replyTo.value,
       attachment: {
         ...uploaded,
         kind: 'voice',
@@ -262,6 +410,7 @@ async function onSendVoice(recording: {
         waveform: recording.waveform,
       },
     })
+    replyTo.value = null
   } finally {
     uploading.value = false
   }
@@ -306,6 +455,7 @@ const contextKey = computed(() =>
       :read-receipts="store.state.readReceipts"
       :can-manage="activeRoom?.kind !== 'dm' && (store.state.channels.find((channel) => channel.id === activeRoom?.id)?.canManage ?? false)"
       :just-sent-ids="store.justSentIds.value"
+      :member-map="chatMemberMap"
       :load-error="roomsError"
       :group-error="groupCreationError"
       @select="onSelect"
@@ -316,12 +466,16 @@ const contextKey = computed(() =>
       @visible-read="onVisibleRead"
       @enter-done="store.enterDone"
       @delete="onDeleteMessage"
+      @quote="replyTo = $event"
+      @mention="onMention"
+      @forward="onForward"
       @create-group="onCreateGroup"
       @open-group-details="onOpenGroupDetails"
     >
       <template #composer>
         <Composer
           v-if="store.state.currentRoom"
+          ref="composerView"
           :key="contextKey"
           :context-key="contextKey"
           :disabled="store.state.realtimeStatus === 'error'"
@@ -329,6 +483,7 @@ const contextKey = computed(() =>
           :uploading="uploading"
           :reply-to="replyTo"
           :contacts="contacts"
+          :can-mention-all="activeRoom?.kind !== 'dm' && (store.state.channels.find((channel) => channel.id === activeRoom?.id)?.myRole === 'owner')"
           @send="onSend"
           :submit-document="onSendDocument"
           @send-voice="onSendVoice"
@@ -344,6 +499,8 @@ const contextKey = computed(() =>
       :summary="receiptTarget ? store.state.readReceipts[receiptTarget.id] ?? null : null"
       :audience-size="audienceSize"
       :room-name="store.state.roomName"
+      :member-map="chatMemberMap"
+      :exclude-user-id="receiptTarget?.sender.id"
       @close="closeReceipts"
     />
 
@@ -357,6 +514,19 @@ const contextKey = computed(() =>
       :error="groupDetailsError"
       @close="groupDetailsOpen = false"
       @invite="onInviteMembers"
+    />
+
+    <!-- #347 转发目标弹窗：群组（已加入频道）+ 联系人（确认时 openDm 解析 dm 房间） -->
+    <ForwardDialog
+      :open="forwardOpen"
+      :mode="forwardState?.mode ?? 'single'"
+      :count="forwardState?.messageIds.length ?? 0"
+      :channels="store.state.channels"
+      :contacts="contacts.filter((contact) => contact.id !== store.state.myUserId)"
+      :busy="forwardBusy"
+      :error="forwardError"
+      @close="onForwardClose"
+      @confirm="onForwardConfirm"
     />
 
     <div v-if="!handshakeError && !handshakeReady" class="chat-root-boot" data-test="handshaking" aria-busy="true">

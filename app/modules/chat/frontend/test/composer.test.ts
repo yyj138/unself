@@ -88,7 +88,7 @@ describe('Composer 发送', () => {
     expect(wrapper.find('[data-test="emoji-picker"]').exists()).toBe(false)
   })
 
-  it('空文本禁用发送；输入后点击发送 emit send(文本, mentionUserIds) 且清空输入', async () => {
+  it('空文本禁用发送；输入后点击发送 emit send(文本, mentionUserIds, mentionAll) 且清空输入', async () => {
     const wrapper = await mountComposer()
     const send = wrapper.find('[data-test="send"]')
     expect((send.element as HTMLButtonElement).disabled).toBe(true)
@@ -98,7 +98,7 @@ describe('Composer 发送', () => {
     await send.trigger('click')
 
     const emitted = wrapper.emitted('send')
-    expect(emitted).toEqual([['你好 世界', []]])
+    expect(emitted).toEqual([['你好 世界', [], false]])
     expect(inputOf(wrapper).element.textContent).toBe('')
   })
 
@@ -155,12 +155,13 @@ describe('Composer @选择器', () => {
     await input.trigger('keydown', { key: 'ArrowDown' }) // alice→bob
     await input.trigger('keydown', { key: 'Enter' })
 
-    expect(input.element.textContent).toBe('嗨 @bob ')
+    // chip 的 DOM 显示是 @displayName；序列化/发送面才是 @username
+    expect(input.element.textContent).toBe('嗨 @Bob ')
     expect(wrapper.find('[data-test="mention-menu"]').exists()).toBe(false)
 
     await input.setValue('嗨 @bob 顺便 @alice 看看')
     await input.trigger('keydown', { key: 'Enter' })
-    expect(wrapper.emitted('send')).toEqual([['嗨 @bob 顺便 @alice 看看', [11, 12]]])
+    expect(wrapper.emitted('send')).toEqual([['嗨 @bob 顺便 @alice 看看', [11, 12], false]])
   })
 
   it('@ 前缀过滤候选，点击候选项同样插入', async () => {
@@ -173,7 +174,7 @@ describe('Composer @选择器', () => {
     expect(options[0]?.attributes('data-test')).toBe('mention-option-carol')
 
     await options[0]!.trigger('mousedown')
-    expect(input.element.textContent).toBe('@carol ')
+    expect(input.element.textContent).toBe('@Carol ')
   })
 
   it('Escape 关闭浮层后，Enter 照常发送文本（浮层不再拦截）', async () => {
@@ -284,7 +285,7 @@ describe('Composer 文件', () => {
     expect(wrapper.get('[data-test="send"]').isVisible()).toBe(true)
     await wrapper.get('[data-test="send"]').trigger('click')
     vi.useFakeTimers()
-    saveDraft('channel', 2, '新会话草稿')
+    saveDraft('channel', 2, [{ type: 'text', text: '新会话草稿' }])
     vi.advanceTimersByTime(DRAFT_SAVE_DELAY_MS + 1)
     vi.useRealTimers()
     await wrapper.setProps({ contextKey: 'channel.2' })
@@ -303,7 +304,7 @@ describe('Composer 草稿', () => {
       const wrapper = await mountComposer({ contextKey: 'channel.7' })
       await inputOf(wrapper).setValue('未发送的草稿')
       await vi.advanceTimersByTimeAsync(300)
-      expect(loadDraft('channel', 7)).toBe('未发送的草稿')
+      expect(loadDraft('channel', 7)).toEqual([{ type: 'text', text: '未发送的草稿' }])
 
       await wrapper.setProps({ contextKey: 'channel.9' })
       expect(inputOf(wrapper).element.textContent).toBe('')
@@ -319,14 +320,14 @@ describe('Composer 草稿', () => {
     // jsdom 无真 localStorage 属性（安全 getter 抛 SecurityError）→ 直接经存储抽象写入
     vi.useFakeTimers()
     try {
-      saveDraft('channel', 5, '旧草稿')
+      saveDraft('channel', 5, [{ type: 'text', text: '旧草稿' }])
       await vi.advanceTimersByTimeAsync(DRAFT_SAVE_DELAY_MS)
       const wrapper = await mountComposer({ contextKey: 'channel.5' })
       expect(inputOf(wrapper).element.textContent).toBe('旧草稿')
 
       await inputOf(wrapper).trigger('keydown', { key: 'Enter' })
       expect(wrapper.emitted('send')).toHaveLength(1)
-      expect(loadDraft('channel', 5)).toBe('')
+      expect(loadDraft('channel', 5)).toEqual([])
 
       await wrapper.setProps({ contextKey: 'channel.6' })
       await wrapper.setProps({ contextKey: 'channel.5' })
@@ -356,6 +357,33 @@ describe('Composer 回复条', () => {
 
     await wrapper.find('[data-test="cancel-reply"]').trigger('click')
     expect(wrapper.emitted('cancel-reply')).toHaveLength(1)
+  })
+
+  // 文档发送也消费引用：Composer 层不清 replyTo（引用归父层 onSendDocument 快照消费），
+  // 因此发送后回复条仍在、不 emit cancel-reply。固化「Composer 不自作主张清引用」契约。
+  it('附件发送后回复条仍在（不 emit cancel-reply）', async () => {
+    const submitDocument = vi.fn().mockResolvedValue(undefined)
+    const wrapper = await mountComposer({
+      submitDocument,
+      replyTo: {
+        id: 99,
+        content: '被引用的原消息',
+        mentionUserIds: [],
+        mentions: [],
+        createdAt: '2026-09-16T00:00:00Z',
+        source: 'local',
+        sender: { kind: 'local', id: 1, username: 'u', displayName: '小明', avatarUrl: '', source: 'local' },
+        attachment: null,
+      },
+    })
+    const input = wrapper.get('input[type="file"]')
+    Object.defineProperty(input.element, 'files', { value: [new File(['x'], 'a.pdf', { type: 'application/pdf' })], configurable: true })
+    await input.trigger('change')
+    await wrapper.get('[data-test="send"]').trigger('click')
+    await flushPromises()
+    expect(submitDocument).toHaveBeenCalledTimes(1)
+    expect(wrapper.emitted('cancel-reply')).toBeUndefined()
+    expect(wrapper.find('[data-test="reply-bar"]').exists()).toBe(true)
   })
 })
 

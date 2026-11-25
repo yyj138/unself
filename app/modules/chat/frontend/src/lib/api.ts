@@ -63,9 +63,31 @@ function normalizeAttachment(pathname: string, attachment: Attachment | null): A
   return { ...attachment, url: moduleFileUrl(pathname, attachment.url) }
 }
 
+/** 附件 url 同源 `/files/`，补模块前缀；forward_bundle 递归（套娃）内嵌条目也补。 */
+function normalizeBlocks(pathname: string, blocks: Message['blocks']): Message['blocks'] {
+  return blocks?.map(block => {
+    if (block.type === 'attachment') {
+      return { ...block, attachment: normalizeAttachment(pathname, block.attachment)! }
+    }
+    if (block.type === 'forward_bundle') {
+      return { ...block, messages: block.messages.map((entry) => ({
+        ...entry,
+        attachment: normalizeAttachment(pathname, entry.attachment),
+        blocks: normalizeBlocks(pathname, entry.blocks ?? undefined) ?? null,
+      })) }
+    }
+    return block
+  })
+}
+
 function normalizeMessage(pathname: string, message: Message): Message {
   return { ...message, attachment: normalizeAttachment(pathname, message.attachment),
-    blocks: message.blocks?.map(block => block.type === 'attachment' ? { ...block, attachment: normalizeAttachment(pathname, block.attachment)! } : block) }
+    blocks: normalizeBlocks(pathname, message.blocks),
+    // 引用块内嵌的附件同源 `/files/`，也要补模块前缀（当前只显示附件名，url 先改对）
+    replyTo: message.replyTo && !message.replyTo.deleted && 'attachment' in message.replyTo
+      ? { ...message.replyTo, attachment: normalizeAttachment(pathname, message.replyTo.attachment) }
+      : message.replyTo,
+  }
 }
 
 function normalizeSocketFrame(pathname: string, frame: Record<string, unknown>): Record<string, unknown> {
@@ -99,16 +121,21 @@ export function createLiveTransport(): Transport {
   }
 }
 
-/** 统一错误解析：优先服务端 error 人话（上游信封即字符串），解析失败用状态码兜底。 */
+/** 统一错误解析：优先服务端 error 人话（字符串信封或 {code,message} 对象信封），解析失败用状态码兜底。 */
 export async function toChatApiError(response: Response): Promise<ChatApiError> {
   let message = `请求失败（${response.status}）`
   try {
     const payload: unknown = await response.json()
-    const serverMessage = (
-      payload as { error?: unknown } | null
-    )?.error
-    if (typeof serverMessage === 'string' && serverMessage.trim()) {
-      message = serverMessage
+    const serverError = (payload as { error?: unknown } | null)?.error
+    // worker v1 返回对象信封 {error:{code,message}}；上游兼容字符串信封（error 即人话）
+    if (typeof serverError === 'string' && serverError.trim()) {
+      message = serverError
+    } else if (
+      serverError !== null && typeof serverError === 'object'
+      && typeof (serverError as { message?: unknown }).message === 'string'
+      && (serverError as { message: string }).message.trim()
+    ) {
+      message = (serverError as { message: string }).message
     }
   } catch {
     // body 非 JSON：保留状态码兜底文案
@@ -136,6 +163,12 @@ export interface ChatApi {
     attachment?: Attachment | null
     blocks?: Message['blocks']
     mentionUserIds?: number[]
+    /** @all 请求标记（仅 @all chip 置位，手打不算）；服务端仍复核 owner + 文本边界。 */
+    mentionAll?: boolean
+    /** 被引用消息（body 字段 replyMessageId，worker v1.js 实测 @29978c2 接收）。 */
+    replyTo?: { id: number } | null
+    /** 转发（#347）：只传源消息 id，服务端读取复制（逐条/合并）；目标即本次请求的房间。 */
+    forward?: { mode: 'single' | 'merged'; messageIds: number[] } | null
   }): Promise<{ created: boolean; message: Message }>
   deleteMessage(kind: RoomKind, roomId: number, messageId: number): Promise<{ deletion?: MessageDeletionNotice } | void>
   uploadFile(file: File): Promise<{ file: Attachment }>
@@ -321,6 +354,9 @@ export function createChatApi(options: CreateChatApiOptions): ChatApi {
           attachment: input.attachment ?? null,
           blocks: input.blocks,
           mentionUserIds: input.mentionUserIds ?? [],
+          mentionAll: input.mentionAll === true,
+          replyMessageId: input.replyTo?.id ?? null,
+          forward: input.forward ?? null,
         }),
       }).then((result) => ({ ...result, message: normalizeMessage(globalThis.location.pathname, result.message) })),
     deleteMessage: (kind, roomId, messageId) =>

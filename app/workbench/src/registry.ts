@@ -30,7 +30,7 @@ export const ModuleRegistrationSchema = z
     /**
      * 落点三列（#348/#103② 用户实际选择，非 manifest 声明快照）。合并语义（#348 review 定案）：
      * 未写 = 保留列中旧值，清空必须显式传值（装配器/注册调用不承担清空）。
-     * 注意不用 .default()：默认值会把「未写」变成「写了 cloudflare/null」，合并语义就没意义了。
+     * 注意不用 .default()：默认值会把「未写」变成「写了 direct/null」，合并语义就没意义了。
      */
     mode: z.enum(DEPLOY_MODES).optional(),
     /** connect 模式的接入 URL；显式 null/空串 = 清空，缺字段 = 保留旧值。 */
@@ -50,7 +50,7 @@ export const ModuleRegistrationSchema = z
     ),
   })
   // #349 U9：entry 列成为地址真值面后的 #63 锚点（原在清单 manifest.entry，U9 移出清单）。
-  // 公网明文 http 拒收（仅 localhost/127.0.0.1/[::1] 明文豁免）——external 模块经浏览器装载,
+  // 公网明文 http 拒收（仅 localhost/127.0.0.1/[::1] 明文豁免）——direct 模块经浏览器装载,
   // 明文公网地址等于令牌裸华；非 http(s)/不可解析也拒（白名单/装载都消费不了）。
   .superRefine((data, ctx) => {
     if (data.entry) {
@@ -95,16 +95,23 @@ export const ConnectRegisterSchema = z.object({
 });
 
 /**
- * connect 记账 pending 态的 manifest 占位快照（#349）：ModuleManifestSchema 的最小合法形状。
- * 决策 #109 两段式中本段不携带真清单（模块还没部署）；真快照由第②段「测试连接→保存」
- * 的 POST /api/admin/modules 写入并覆盖此占位。地址面只在 entry 列（U9：清单不承载地址），
+ * 记账占位 manifest（#349 反连接入；#369「我已有地址」登记共用）：ModuleManifestSchema 的最小合法形状。
+ * 承载两种「先记账、真清单后补」的动线：
+ * - 反连：决策 #109 两段式的第①段，本段不携带真清单（模块还没部署），真快照由第②段
+ *   「测试连接→保存」的 POST /api/admin/modules 写入并覆盖此占位；
+ * - 已有地址：管理员直接登记自己部署好的 worker（不一定发过 npm），注册表先落占位，
+ *   真清单当前没有自报通道（见 routes/modules.ts 的 install 端点注释）。
+ *
+ * `runtimes` 在这里**不表达事实**：反连模块跑在 Node 进程里，已有地址的模块跑在哪不确定
+ * （它只是一个能被访问到的 HTTP 服务）。占位只求过 schema 的最小形状（runtimes 非空且
+ * ∈ {worker,node}），真清单靠模块自报。地址面只在 entry 列（U9：清单不承载地址），
  * credential_hash 列（非快照）才是凭证真值面。
  */
 export function connectPendingManifest(moduleId: string): z.infer<typeof ModuleManifestSchema> {
   return ModuleManifestSchema.parse({
     id: moduleId,
     version: '0.0.0',
-    runtimes: ['external'],
+    runtimes: ['node'],
     route: `/m/${moduleId}`,
   });
 }
@@ -121,7 +128,7 @@ export interface RegistryEntry {
   lifecycle: ModuleLifecycle;
   version: string | null;
   manifest: unknown;
-  /** 落点形态（#348）；缺省 cloudflare。 */
+  /** 接入方式（#369 两态）；缺省 direct。 */
   mode: DeployMode;
   /** connect 模式接入 URL；其余模式 NULL。 */
   entry: string | null;
@@ -176,7 +183,7 @@ export function rowToEntry(row: {
     lifecycle: (row.lifecycle ?? 'pending') as ModuleLifecycle,
     version: row.version,
     manifest,
-    mode: (row.mode ?? 'cloudflare') as DeployMode,
+    mode: (row.mode ?? 'direct') as DeployMode,
     entry: row.entry ?? null,
     storage_level: (row.storage_level ?? null) as StorageLevel | null,
   };
@@ -195,7 +202,7 @@ export async function upsertModule(db: D1Database, reg: ModuleRegistration): Pro
   const lifecycle: ModuleLifecycle = reg.enabled ? 'active' : 'disabled';
   const row = await db
     .prepare(
-      `INSERT INTO module_registry (id, enabled, lifecycle, version, manifest_json, mode, entry, storage_level, credential_hash) VALUES (?1, ?2, ?9, ?3, ?4, coalesce(?5, 'cloudflare'), ?6, ?7, ?8)
+      `INSERT INTO module_registry (id, enabled, lifecycle, version, manifest_json, mode, entry, storage_level, credential_hash) VALUES (?1, ?2, ?9, ?3, ?4, coalesce(?5, 'direct'), ?6, ?7, ?8)
        ON CONFLICT(id) DO UPDATE SET enabled = excluded.enabled, lifecycle = excluded.lifecycle, version = excluded.version, manifest_json = excluded.manifest_json,
        mode = coalesce(?5, mode), entry = coalesce(?6, CASE WHEN coalesce(?5, mode) = 'connect' THEN entry END), storage_level = coalesce(?7, storage_level),
        credential_hash = coalesce(?8, credential_hash)

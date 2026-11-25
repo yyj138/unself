@@ -2,9 +2,10 @@
 // Source: aozorae/Edgechat@29978c221ee3ae641ce0b9b97851656c00714a5d worker/src/message-submission.js（GPL-3.0-only，裁剪版）
 import { blockText } from "./message-blocks.js";
 import { insertMessage, insertMessageIdempotent } from "./data/messages.js";
-import { resolveMessageMentionUserIds } from "./data/mentions.js";
+import { resolveMessageMentionUserIds, contentMentionsAll } from "./data/mentions.js";
 import { resolveMessageReply } from "./data/replies.js";
 import { getDirectMessageBlockStatus } from "./data/user-blocks.ts";
+import { dmBlockRejectionOf } from "./dm-blocks.js";
 
 export class MessageSubmissionError extends Error {
 	constructor(message, code = "invalid_request", status = 400) {
@@ -15,9 +16,29 @@ export class MessageSubmissionError extends Error {
 	}
 }
 
+/**
+ * @all（@所有人）复核：仅群主（channel_members.role = 'owner'）可用，DM 恒否。
+ * 客户端必须带 mentionAll=true（只有选中候选插入的 @all chip 才会置位，手打文本不算——#347 定案），
+ * 且文本含边界包裹的 `@所有人`；任一不满足都静默降级为普通消息
+ * （与个人提及的服务端静默复核风格一致；契约见 docs/requirements.md 4.1）。
+ */
+export async function resolveMessageMentionAll(db, { channelId, roomKind, senderId, content, requested }) {
+	if (!requested || roomKind === "dm" || !contentMentionsAll(content)) {
+		return 0;
+	}
+	const row = await db
+		.prepare(
+			"SELECT role FROM channel_members WHERE channel_id = ? AND user_id = ? AND role = 'owner' LIMIT 1",
+		)
+		.bind(Number(channelId), Number(senderId))
+		.first();
+	return row ? 1 : 0;
+}
+
 export function createMessageSubmission({
 	persistMessage = insertMessage,
 	resolveMentions = resolveMessageMentionUserIds,
+	resolveMentionAll = resolveMessageMentionAll,
 	resolveReply = resolveMessageReply,
 	resolveDmBlockStatus = getDirectMessageBlockStatus,
 } = {}) {
@@ -30,28 +51,25 @@ export function createMessageSubmission({
 					Number(meta.room.id),
 					Number(meta.principal.userId),
 				);
-				if (blockStatus.blockedByPeer) {
-					throw new MessageSubmissionError(
-						"发送被拒，你已经被拉黑",
-						"blocked_by_recipient",
-						403,
-					);
-				}
-				if (blockStatus.blockedBySender) {
-					throw new MessageSubmissionError(
-						"请先解除拉黑再发送",
-						"recipient_blocked",
-						403,
-					);
+				const rejection = dmBlockRejectionOf(blockStatus);
+				if (rejection) {
+					throw new MessageSubmissionError(rejection.message, rejection.code, rejection.status);
 				}
 			}
-			const [mentionUserIds, reply] = await Promise.all([
+			const [mentionUserIds, mentionAll, reply] = await Promise.all([
 				resolveMentions(env.DB, {
 					channelId: meta.room.id,
 					roomKind: meta.room.kind,
 					senderId: meta.principal.userId,
 					content: payload.content,
 					candidateUserIds: payload.mentionUserIds,
+				}),
+				resolveMentionAll(env.DB, {
+					channelId: meta.room.id,
+					roomKind: meta.room.kind,
+					senderId: meta.principal.userId,
+					content: payload.content,
+					requested: payload.mentionAll === true,
 				}),
 				resolveReply(env.DB, {
 					channelId: meta.room.id,
@@ -65,6 +83,7 @@ export function createMessageSubmission({
 				attachment: payload.attachment,
 				blocks: payload.blocks,
 				mentionUserIds,
+				mentionAll,
 			};
 			if (reply.messageId) {
 				persistencePayload.replyToMessageId = reply.messageId;
