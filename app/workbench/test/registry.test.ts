@@ -255,10 +255,10 @@ describe('registry CRUD 与启停语义（#7）', () => {
       storage_level: 'core',
     });
 
-    // 缺省：不带落点字段 → mode=cloudflare，entry/storage_level 均空
+    // 缺省：不带落点字段 → mode=direct，entry/storage_level 均空
     await register(env, cookie, { id: 'plain', manifest: helloManifest });
     const plain = db.first<Record<string, unknown>>("SELECT mode, entry, storage_level FROM module_registry WHERE id = 'plain'");
-    expect(plain).toEqual({ mode: 'cloudflare', entry: null, storage_level: null });
+    expect(plain).toEqual({ mode: 'direct', entry: null, storage_level: null });
 
     // 反面：connect 而 entry 为空 → 400 人话（与 0012 CHECK 同一规则）
     const bad = await register(env, cookie, { id: 'bad', manifest: helloManifest, mode: 'connect' });
@@ -271,7 +271,7 @@ describe('registry CRUD 与启停语义（#7）', () => {
     expect((await register(env, cookie, { id: 'x2', manifest: helloManifest, storage_level: 'mega' })).status).toBe(400);
 
     // 空串归一为 null（不用空串占位）
-    await register(env, cookie, { id: 'blank', manifest: helloManifest, mode: 'cloudflare', entry: '', storage_level: '' });
+    await register(env, cookie, { id: 'blank', manifest: helloManifest, mode: 'direct', entry: '', storage_level: '' });
     const blank = db.first<Record<string, unknown>>("SELECT entry, storage_level FROM module_registry WHERE id = 'blank'");
     expect(blank).toEqual({ entry: null, storage_level: null });
   });
@@ -751,14 +751,14 @@ describe('运行时装配端点 POST /api/admin/modules/install（#349）', () =
     expect(res.status).toBe(403);
   });
 
-  it('入参不全 400：缺 cfToken/accountId 不发请求', async () => {
+  it('入参不全 400：缺 cfToken/accountId 不发请求（上传/建路由形态）', async () => {
     const { env, cookie } = await envFor('admin');
-    const res = await install(env, cookie, { npmSpec: 'hello' });
+    const res = await install(env, cookie, { npmSpec: 'hello', mount: { kind: 'zone', domain: 'team.example.com' } });
     expect(res.status).toBe(400);
     await expect(res.json()).resolves.toMatchObject({ error: 'invalid install request' });
   });
 
-  it('happy path：上传成功 → registry 落 mode=cloudflare + 三列；响应不回显 token', async () => {
+  it('zone 挂载：上传 worker + 建 <domain>/m/<id>/* 路由，entry 由系统算（mode=direct）', async () => {
     const { env, db, cookie } = await envFor('admin');
     const { vi } = await import('vitest');
     const tar = await import('./helpers/fake-npm-package');
@@ -779,28 +779,154 @@ describe('运行时装配端点 POST /api/admin/modules/install（#349）', () =
         cfToken: 'cf-secret-token',
         accountId: 'acc-1',
         storageLevel: 'core',
+        mount: { kind: 'zone', domain: 'team.example.com' },
       });
       expect(res.status).toBe(201);
       const body = await res.json() as Record<string, unknown>;
-      expect(body).toMatchObject({ id: 'hello', mode: 'cloudflare', storage_level: 'core' });
+      expect(body).toMatchObject({ id: 'hello', mode: 'direct', entry: 'https://team.example.com/m/hello/', storage_level: 'core' });
       expect(JSON.stringify(body)).not.toContain('cf-secret-token');
 
-      const row = db.first<{ mode: string; storage_level: string | null; credential_hash: string | null }>(
-        'SELECT mode, storage_level, credential_hash FROM module_registry WHERE id = ?',
+      const row = db.first<{ mode: string; entry: string | null; storage_level: string | null; credential_hash: string | null }>(
+        'SELECT mode, entry, storage_level, credential_hash FROM module_registry WHERE id = ?',
         'hello',
       );
-      expect(row).toEqual({ mode: 'cloudflare', storage_level: 'core', credential_hash: null });
+      expect(row).toEqual({
+        mode: 'direct',
+        entry: 'https://team.example.com/m/hello/',
+        storage_level: 'core',
+        credential_hash: null,
+      });
       // 审计只记模块 id
       expect(db.first<{ action: string; target: string }>('SELECT action, target FROM audit_log')).toMatchObject({
         action: 'module_upserted',
         target: 'hello',
       });
       expect(JSON.stringify(db.query('SELECT * FROM audit_log'))).not.toContain('cf-secret-token');
-      // 凭证没有被任何一跳带串（元数据/tarball 不带 auth，只有 CF 上传带）
-      expect(stub.calls.filter((c) => c.auth).length).toBe(1);
+      // token 只出现在 CF 那几跳（npm 元数据/tarball 不带 auth）
+      expect(stub.calls.filter((c) => c.auth).every((c) => c.url.includes('api.cloudflare.com'))).toBe(true);
+      expect(stub.calls.filter((c) => !c.auth).every((c) => !c.url.includes('api.cloudflare.com'))).toBe(true);
+      // 路由真被建出来（pattern 是用户挂载的真值，不是装饰）
+      const routeCall = stub.calls.find((c) => c.method === 'POST' && c.url.endsWith('/workers/routes'));
+      expect(routeCall?.url).toContain('/zones/zone-1/workers/routes');
     } finally {
       vi.unstubAllGlobals();
     }
+  });
+
+  it('workers.dev 挂载：开通脚本子域，entry = <script>.<accountSubdomain>.workers.dev', async () => {
+    const { env, db, cookie } = await envFor('admin');
+    const { vi } = await import('vitest');
+    const tar = await import('./helpers/fake-npm-package');
+    const stub = tar.stubNpmFetch({
+      'package/manifest.json': JSON.stringify({ id: 'hello', route: '/m/hello', runtimes: ['worker'], version: '1.2.3' }),
+      'package/worker.js': 'export default {}',
+    });
+    vi.stubGlobal('fetch', stub.impl);
+    try {
+      const res = await install(env, cookie, {
+        npmSpec: 'hello',
+        cfToken: 'cf-secret-token',
+        accountId: 'acc-1',
+        mount: { kind: 'workers-dev' },
+      });
+      expect(res.status).toBe(201);
+      expect(await res.json()).toMatchObject({
+        id: 'hello',
+        mode: 'direct',
+        entry: 'https://hello.test-subdomain.workers.dev/',
+      });
+      expect(
+        db.first<{ entry: string }>('SELECT entry FROM module_registry WHERE id = ?', 'hello')?.entry,
+      ).toBe('https://hello.test-subdomain.workers.dev/');
+      expect(stub.calls.some((c) => c.method === 'POST' && c.url.endsWith('/workers/scripts/hello/subdomain'))).toBe(true);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('我已有地址：只给模块 id + 地址就登记（mode=direct、active、清单是占位；不读包、不碰 CF）', async () => {
+    const { env, db, cookie } = await envFor('admin');
+    const { vi } = await import('vitest');
+    // existing 分支不该发任何网络请求（既不拉 npm，也不调 CF）：一有请求就炸
+    const noNetwork = vi.fn(() => {
+      throw new Error('existing 登记不该发网络请求');
+    });
+    vi.stubGlobal('fetch', noNetwork);
+    try {
+      const res = await install(env, cookie, {
+        mount: { kind: 'existing', moduleId: 'hello', entry: 'https://modules.example.com/hello/' },
+      });
+      expect(res.status).toBe(201);
+      const body = (await res.json()) as {
+        id: string;
+        enabled: boolean;
+        lifecycle: string;
+        mode: string;
+        entry: string;
+        manifest: { version: string };
+      };
+      expect(body).toMatchObject({
+        id: 'hello',
+        enabled: true,
+        lifecycle: 'active',
+        mode: 'direct',
+        entry: 'https://modules.example.com/hello/',
+      });
+      // 清单停在 0.0.0 占位：版本/图标要等模块自报（existing 当前没有自报通道）
+      expect(body.manifest.version).toBe('0.0.0');
+      expect(noNetwork).not.toHaveBeenCalled();
+      expect(
+        db.first<{ mode: string; entry: string; lifecycle: string; version: string; enabled: number }>(
+          'SELECT mode, entry, lifecycle, version, enabled FROM module_registry WHERE id = ?',
+          'hello',
+        ),
+      ).toEqual({
+        mode: 'direct',
+        entry: 'https://modules.example.com/hello/',
+        lifecycle: 'active',
+        version: '0.0.0',
+        enabled: 1,
+      });
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('我已有地址：缺模块 id 400，不落库', async () => {
+    const { env, db, cookie } = await envFor('admin');
+    const res = await install(env, cookie, {
+      mount: { kind: 'existing', entry: 'https://modules.example.com/hello/' },
+    });
+    expect(res.status).toBe(400);
+    await expect(res.json()).resolves.toMatchObject({ error: 'invalid install request' });
+    expect(db.query('SELECT id FROM module_registry')).toEqual([]);
+  });
+
+  it('我已有地址：id 已存在 active 行 409，整行不动（不覆盖已装好的模块）', async () => {
+    const { env, db, cookie } = await envFor('admin');
+    db.run(
+      `INSERT INTO module_registry (id, enabled, lifecycle, version, manifest_json, mode, entry) VALUES ('hello', 1, 'active', '1.2.3', '{"id":"hello","version":"1.2.3","runtimes":["worker"],"route":"/m/hello"}', 'direct', 'https://old.example.com/hello/')`,
+    );
+
+    const res = await install(env, cookie, {
+      mount: { kind: 'existing', moduleId: 'hello', entry: 'https://modules.example.com/hello/' },
+    });
+    expect(res.status).toBe(409);
+    expect(
+      db.first<{ entry: string; version: string; lifecycle: string }>(
+        'SELECT entry, version, lifecycle FROM module_registry WHERE id = ?',
+        'hello',
+      ),
+    ).toEqual({ entry: 'https://old.example.com/hello/', version: '1.2.3', lifecycle: 'active' });
+  });
+
+  it('我已有地址：非 https（公网）拒收，不落库', async () => {
+    const { env, db, cookie } = await envFor('admin');
+    const res = await install(env, cookie, {
+      mount: { kind: 'existing', moduleId: 'hello', entry: 'http://modules.example.com/hello/' },
+    });
+    expect(res.status).toBe(400);
+    expect(db.query('SELECT id FROM module_registry')).toEqual([]);
   });
 });
 
@@ -816,5 +942,6 @@ describe('「新增模块」端点路径与客户端单点一致（#349）', () 
     expect(routes).toContain(`GET ${ADD_MODULE_PATHS.status}`);
     expect(routes).toContain(`POST ${ADD_MODULE_PATHS.activate}`);
     expect(routes).toContain(`POST ${ADD_MODULE_PATHS.install}`);
+    expect(routes).toContain(`GET ${ADD_MODULE_PATHS.zones}`);
   });
 });

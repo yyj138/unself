@@ -32,6 +32,8 @@ export interface Channel {
   lastMessagePreview?: string | null
   unreadCount: number
   mentionUnreadCount: number
+  /** @all 独立红标计数（契约 4.1）：mention_all=1 的未读数；DM/旧 worker 缺省（视同 0）。 */
+  mentionAllUnreadCount?: number
 }
 
 export interface ChannelMember extends UserSummary {
@@ -45,6 +47,14 @@ export interface UserSummary {
   username: string
   displayName: string
   avatarUrl: string
+  /**
+   * 真实登录名三态（#透传）：string=内置账号登录名；null=明确的 OIDC 账号（无登录名，显示占位）；
+   * undefined=来源未知/非 core 身份/未升级 worker → 资料卡整行不渲染。
+   * 本接口的 `username` 是 JIT 幂等锚点（core:<sub>），不外露也不该展示。
+   */
+  loginName?: string | null
+  /** 工作邮箱；未开户/IdP 未签时省略（前端「无则隐藏」）。 */
+  email?: string
 }
 
 /** 私聊会话（GET /api/dm 出参项，上游 mapUserDm）。 */
@@ -81,7 +91,22 @@ export interface Attachment {
 
 export interface MessageDeletionNotice { actorId: number; actorName: string; action: 'recalled' | 'removed' }
 
-export type MessageBlock = { type: 'text'; text: string } | { type: 'attachment'; attachment: Attachment }
+/** 合并转发条目（#347）：bundle 内嵌的轻量消息副本（浮层展示用，不带 id/回执）。 */
+export interface ForwardBundleEntry {
+  content: string
+  blocks: MessageBlock[] | null
+  attachment: Attachment | null
+  senderName: string
+  createdAt: string
+  /** 引用快照（#347 反馈③）：浮层内与正常聊天一致渲染引用卡；无引用/原文已删为占位。 */
+  reply?: { authorName?: string; text: string; deleted?: boolean } | null
+}
+
+export type MessageBlock =
+  | { type: 'text'; text: string }
+  | { type: 'attachment'; attachment: Attachment }
+  /** 合并转发（#347）：服务端内部载荷，气泡渲染摘要卡，点开浮层看 messages。 */
+  | { type: 'forward_bundle'; count: number; messages: ForwardBundleEntry[] }
 
 /** 提及片段（渲染 @ 高亮用；上游 mapMessage.mentions）。 */
 export interface Mention {
@@ -97,6 +122,8 @@ export interface MessageSender {
   username: string
   displayName: string
   avatarUrl: string
+  /** 真实登录名三态（#透传），同 UserSummary.loginName。 */
+  loginName?: string | null
   source: string
 }
 
@@ -121,6 +148,8 @@ export interface Message {
   id: number
   content: string
   mentionUserIds: number[]
+  /** @all（@所有人，仅群主可发；服务端复核 mention_all=1）。缺省/false = 普通消息。 */
+  mentionAll?: boolean
   mentions: Mention[]
   createdAt: string
   source: string
@@ -172,7 +201,11 @@ export interface WsRoomMessageNotice {
   createdAt: string
   unreadCount: number
   mentionUnreadCount?: number
+  /** @all 未读（契约 4.1）：[@全体成员] 红标独立计数；非 @all 消息缺省。 */
+  mentionAllUnreadCount?: number
   mentionsMe: boolean
+  /** @all 对所有非发送成员触发（不含在 mentionsMe 里，两类红标独立）。 */
+  mentionedByAll?: boolean
   replyToMe: boolean
   contentPreview: string
   sender: MessageSender

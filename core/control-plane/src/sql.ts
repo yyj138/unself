@@ -13,7 +13,7 @@ import { migrationsTableFor, type ModuleRegistration } from './types';
 /**
  * upsert 冲突分支合并语义（#348 review 定案，#103②「用户实际选择」的构成定义）：
  * 落点三列与 credential_hash（#349）要活过模块升级——本次未写（绑定值为 NULL）保留列中旧值，
- * 清空必须走显式写值（管理接口/管理动作），装配器不承担清空职责。首次插入的缺省值（mode='cloudflare'）由
+ * 清空必须走显式写值（管理接口/管理动作），装配器不承担清空职责。首次插入的缺省值（mode='direct'）由
  * VALUES 里的 coalesce 承载（列 DEFAULT 不救显式 NULL）；冲突分支引用原始绑定值与目标行
  * 现值合并，不复用被 coerce 过的 excluded.*（否则会把「未写」变成「写默认值」）。同一 ?N
  * 可多处引用，bind 数仍是 8（D1 与 node:sqlite 同语义，三实现共用）。
@@ -22,17 +22,27 @@ import { migrationsTableFor, type ModuleRegistration } from './types';
  * installer 同源副本（app/installer/src/engine/registry.ts）随本语句同步 8 参；installer
  * 本身不传凭证（缺省 NULL 保留旧值），反连凭证只经 connect-register / 保存流程写入。
  * enabled/version/manifest_json 仍随注册刷新。
+ *
+ * 两份常量、一条语句：写语句本体只有 REGISTRY_UPSERT_WRITE_SQL 这一份；四个控制面实现
+ * （D1 / node:sqlite / REST / PG）用的 REGISTRY_UPSERT_SQL 是它 + RETURNING（要回显合并后的
+ * 真行）；installer 的装配路径只写不读结果集，直接用写语句本体。以前 installer 自带一份
+ * 「逐字同构」的副本、靠注释提醒同步——现在结构上不可能漂移（#369 收口）。
+ * 可移植性（#360 真库实测）：ON CONFLICT DO UPDATE 的 SET 表达式里引用目标行时**必须**写表名
+ * （`module_registry.mode`）。PG 的 DO UPDATE 同时把目标行与 `excluded` 放进作用域，裸列名
+ * 会报 `column reference "mode" is ambiguous`；SQLite 接受限定名，两边都是这一份。
  */
-export const REGISTRY_UPSERT_SQL = `INSERT INTO module_registry (id, enabled, version, manifest_json, mode, entry, storage_level, credential_hash)
-VALUES (?1, ?2, ?3, ?4, coalesce(?5, 'cloudflare'), ?6, ?7, ?8)
+export const REGISTRY_UPSERT_WRITE_SQL = `INSERT INTO module_registry (id, enabled, version, manifest_json, mode, entry, storage_level, credential_hash)
+VALUES (?1, ?2, ?3, ?4, coalesce(?5, 'direct'), ?6, ?7, ?8)
 ON CONFLICT(id) DO UPDATE SET
   enabled = excluded.enabled,
   version = excluded.version,
   manifest_json = excluded.manifest_json,
-  mode = coalesce(?5, mode),
-  entry = coalesce(?6, CASE WHEN coalesce(?5, mode) = 'connect' THEN entry END),
-  storage_level = coalesce(?7, storage_level),
-  credential_hash = coalesce(?8, credential_hash)
+  mode = coalesce(?5, module_registry.mode),
+  entry = coalesce(?6, CASE WHEN coalesce(?5, module_registry.mode) = 'connect' THEN module_registry.entry END),
+  storage_level = coalesce(?7, module_registry.storage_level),
+  credential_hash = coalesce(?8, module_registry.credential_hash)`;
+
+export const REGISTRY_UPSERT_SQL = `${REGISTRY_UPSERT_WRITE_SQL}
 RETURNING id, enabled, version, manifest_json, mode, entry, storage_level, credential_hash`;
 
 export const REGISTRY_TOGGLE_SQL =

@@ -8,6 +8,7 @@ import AddModuleDialog from './add-module-dialog.vue'
 import ModulesPage from './ModulesPage.vue'
 import {
   activateConnectModule,
+  fetchAccountZones,
   fetchConnectStatus,
   generateConnectKey,
   installCloudflareModule,
@@ -28,6 +29,7 @@ vi.mock('../lib/modules-install-api', () => ({
   fetchConnectStatus: vi.fn(),
   activateConnectModule: vi.fn(),
   installCloudflareModule: vi.fn(),
+  fetchAccountZones: vi.fn(),
 }))
 
 vi.mock('../lib/admin-api', () => ({
@@ -39,7 +41,7 @@ const mod = (over: Partial<AdminModule> = {}): AdminModule => ({
   id: 'hello',
   enabled: true,
   version: '0.1.0',
-  mode: 'cloudflare',
+  mode: 'direct',
   entry: null,
   storage_level: null,
   ...over,
@@ -66,6 +68,10 @@ describe('AddModuleDialog（#349 双模式）', () => {
     vi.mocked(fetchConnectStatus).mockResolvedValue({ moduleId: 'bridge', online: true })
     vi.mocked(activateConnectModule).mockResolvedValue(mod({ id: 'bridge', mode: 'connect', entry: 'https://t/m/bridge/' }))
     vi.mocked(installCloudflareModule).mockResolvedValue(mod())
+    vi.mocked(fetchAccountZones).mockResolvedValue([
+      { id: 'zone-1', name: 'team.example.com' },
+      { id: 'zone-2', name: 'modules.example.com' },
+    ])
     // 重名预检的数据源：默认空列表（没有同名模块）
     vi.mocked(fetchAdminModules).mockResolvedValue([])
   })
@@ -102,8 +108,8 @@ describe('AddModuleDialog（#349 双模式）', () => {
     // CF tab 同款收敛
     const cf = mountDialog()
     await cf.find('[data-test="add-module-tab-cloudflare"]').trigger('click')
-    const [cfSelect] = cf.findAllComponents(UMotionSelect)
-    const cfOptions = cfSelect!.props('options') as Array<{ value: string; label: string }>
+    const cfSelect = cf.findAllComponents(UMotionSelect).find((c) => c.props('label') === '存储落点')!
+    const cfOptions = cfSelect.props('options') as Array<{ value: string; label: string }>
     expect(cfOptions.map((o) => o.value)).toEqual(['self', 'core'])
     await cf.find('[data-test="cf-npmspec"]').setValue('@unself/hello@0.1.0')
     await cf.find('[data-test="cf-account"]').setValue('acc-1')
@@ -360,9 +366,113 @@ describe('AddModuleDialog（#349 双模式）', () => {
       cfToken: 'cf-plain-token',
       accountId: 'acc-1',
       storageLevel: undefined,
+      mount: { kind: 'workers-dev' },
     })
     expect((wrapper.find('[data-test="cf-token"]').element as HTMLInputElement).value).toBe('')
     expect(wrapper.emitted('done')).toHaveLength(1)
+  })
+
+  /** 「挂到」下拉按当前选项切换：找到 label=挂到 的 UMotionSelect 并改值。 */
+  async function chooseMount(wrapper: ReturnType<typeof mount>, value: 'zone' | 'workers-dev' | 'existing') {
+    const mountSelect = wrapper.findAllComponents(UMotionSelect).find((c) => c.props('label') === '挂到')!
+    mountSelect.vm.$emit('update:modelValue', value)
+    await flushPromises()
+  }
+
+  it('挂到「我已有地址」：npm 包输入消失，换成模块 id + 地址；不要求 token/账号，请求只带 id 与地址', async () => {
+    const wrapper = mountDialog()
+    await wrapper.find('[data-test="add-module-tab-cloudflare"]').trigger('click')
+    await chooseMount(wrapper, 'existing')
+
+    // 管理员自己的 worker 已经部署好了：不需要 npm 包
+    expect(wrapper.find('[data-test="cf-npmspec"]').exists()).toBe(false)
+    expect(wrapper.find('[data-test="cf-module-id"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test="cf-entry"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test="cf-token"]').exists()).toBe(false)
+    expect(wrapper.find('[data-test="cf-account"]').exists()).toBe(false)
+    const installButton = wrapper.find('[data-test="cf-install"]')
+    expect(installButton.text()).toContain('注册')
+    expect(installButton.text()).not.toContain('部署')
+
+    await wrapper.find('[data-test="cf-module-id"]').setValue('hello')
+    await wrapper.find('[data-test="cf-entry"]').setValue('https://modules.example.com/hello/')
+    await installButton.trigger('click')
+    await flushPromises()
+
+    const payload = vi.mocked(installCloudflareModule).mock.calls[0]![0]
+    expect(payload).not.toHaveProperty('npmSpec')
+    expect(payload).not.toHaveProperty('cfToken')
+    expect(payload).not.toHaveProperty('accountId')
+    expect(payload).toMatchObject({
+      storageLevel: undefined,
+      mount: { kind: 'existing', moduleId: 'hello', entry: 'https://modules.example.com/hello/' },
+    })
+  })
+
+  it('「我已有地址」不要求 npm 包：只填 id 与地址即可提交；模块 id 不合法时说人话拦下', async () => {
+    const wrapper = mountDialog()
+    await wrapper.find('[data-test="add-module-tab-cloudflare"]').trigger('click')
+    await chooseMount(wrapper, 'existing')
+
+    await wrapper.find('[data-test="cf-entry"]').setValue('https://modules.example.com/hello/')
+    // 没有 id：不可提交（id 是注册表主键，不能从包里读）
+    expect(wrapper.find('[data-test="cf-install"]').attributes('disabled')).toBeDefined()
+
+    await wrapper.find('[data-test="cf-module-id"]').setValue('Hello_1')
+    await wrapper.find('[data-test="cf-install"]').trigger('click')
+    await flushPromises()
+    expect(installCloudflareModule).not.toHaveBeenCalled()
+    expect(wrapper.find('[data-test="add-module-alert"]').text()).toContain('小写字母')
+  })
+
+  it('从「我已有地址」切回上传形态：npm 包原值还在，可继续部署', async () => {
+    const wrapper = mountDialog()
+    await wrapper.find('[data-test="add-module-tab-cloudflare"]').trigger('click')
+    await wrapper.find('[data-test="cf-npmspec"]').setValue('@unself/hello@0.1.0')
+
+    await chooseMount(wrapper, 'existing')
+    expect(wrapper.find('[data-test="cf-npmspec"]').exists()).toBe(false)
+
+    await chooseMount(wrapper, 'workers-dev')
+    expect((wrapper.find('[data-test="cf-npmspec"]').element as HTMLInputElement).value).toBe('@unself/hello@0.1.0')
+  })
+
+  it('挂到「账号下已有域名」：读取账号域名后可选；部署请求带 zone + domain', async () => {
+    const wrapper = mountDialog()
+    await wrapper.find('[data-test="add-module-tab-cloudflare"]').trigger('click')
+    await chooseMount(wrapper, 'zone')
+
+    await wrapper.find('[data-test="cf-npmspec"]').setValue('@unself/hello@0.1.0')
+    await wrapper.find('[data-test="cf-account"]').setValue('acc-1')
+    await wrapper.find('[data-test="cf-token"]').setValue('cf-plain-token')
+    // 未读域名前不能提交
+    expect(wrapper.find('[data-test="cf-install"]').attributes('disabled')).toBeDefined()
+
+    await wrapper.find('[data-test="cf-load-zones"]').trigger('click')
+    await flushPromises()
+    expect(fetchAccountZones).toHaveBeenCalledWith('acc-1', 'cf-plain-token')
+
+    await wrapper.find('[data-test="cf-install"]').trigger('click')
+    await flushPromises()
+    expect(installCloudflareModule).toHaveBeenCalledWith(
+      expect.objectContaining({
+        mount: { kind: 'zone', domain: 'team.example.com' },
+      }),
+    )
+  })
+
+  it('Token 权限说明：hover/focus 才显示（tooltip 承载，不新造组件）', async () => {
+    const wrapper = mountDialog()
+    await wrapper.find('[data-test="add-module-tab-cloudflare"]').trigger('click')
+    const tipVisible = (): boolean =>
+      !(wrapper.find('[data-test="cf-token-tip"]').attributes('style') ?? '').includes('display: none')
+
+    expect(tipVisible()).toBe(false)
+    await wrapper.find('[data-test="cf-token-help"]').trigger('mouseenter')
+    expect(tipVisible()).toBe(true)
+    expect(wrapper.find('[data-test="cf-token-tip"]').text()).toContain('Workers Scripts')
+    await wrapper.find('[data-test="cf-token-help"]').trigger('mouseleave')
+    expect(tipVisible()).toBe(false)
   })
 })
 

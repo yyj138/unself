@@ -39,6 +39,8 @@ export interface ChatLayoutProps {
   /** 会话列表加载失败人话（#221 走查补：错误态替代空态，不再静默吞错）。 */
   loadError?: string | null
   groupError?: string
+  /** 消息头像资料卡的群内身份（senderId → ChannelMember；拉取失败为空表，卡片降级）。 */
+  memberMap?: Map<number, import('../lib/types').ChannelMember>
 }
 
 const props = withDefaults(defineProps<ChatLayoutProps>(), {
@@ -48,6 +50,7 @@ const props = withDefaults(defineProps<ChatLayoutProps>(), {
   readReceipts: () => ({}),
   loadError: null,
   groupError: '',
+  memberMap: () => new Map(),
   canManage: false,
   contacts: () => [],
 })
@@ -63,6 +66,12 @@ const emit = defineEmits<{
   /** #339② 入场动效播完 → 根层转 store.enterDone。 */
   'enter-done': [messageId: number]
   delete: [message: Message]
+  /** 右键菜单选「引用」→ 根层开 composer 回复条。 */
+  quote: [message: Message]
+  /** #347 右键头像选「@ 提及」→ 根层往 composer 插入 @username。 */
+  mention: [message: Message]
+  /** #347 转发确认 → 根层开转发目标弹窗（多选操作条 / 右键单条）。 */
+  forward: [payload: { mode: 'single' | 'merged'; messageIds: number[] }]
   'open-dm': [userId: number]
   'create-group': [input: { name: string; memberUserIds: number[] }]
   'open-group-details': []
@@ -229,11 +238,15 @@ const activeChannel = computed(() => props.activeRoom?.kind === 'dm'
         :read-receipts="readReceipts"
         :can-manage="canManage"
         :just-sent-ids="justSentIds"
+        :member-map="memberMap"
         @load-earlier="emit('load-earlier')"
         @show-receipts="emit('show-receipts', $event)"
         @visible-read="emit('visible-read', $event)"
         @enter-done="emit('enter-done', $event)"
         @delete="emit('delete', $event)"
+        @quote="emit('quote', $event)"
+        @mention="emit('mention', $event)"
+        @forward="emit('forward', $event)"
       />
 
       <!-- composer 插槽：T4/T5 填充（发送/@/文件/语音入口） -->
